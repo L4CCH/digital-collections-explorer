@@ -136,6 +136,31 @@ def test_private_manifest_is_read_even_when_images_are_anonymous(monkeypatch, tm
     assert Path(local).read_bytes() == b"parquet"
 
 
+def test_a_manifest_can_list_files_on_this_machine_relative_to_itself(tmp_path):
+    import duckdb
+
+    from src.profiling.sources import ParquetManifestSource
+
+    (tmp_path / "scans").mkdir()
+    Image.new("RGB", (4, 4)).save(tmp_path / "scans" / "a.jpg")
+    elsewhere = tmp_path / "b.jpg"
+    Image.new("RGB", (4, 4)).save(elsewhere)
+    manifest = tmp_path / "manifest.parquet"
+    duckdb.execute(
+        f"COPY (SELECT * FROM (VALUES ('scans/a.jpg'), ('{elsewhere}'), "
+        f"('scans/missing.jpg')) AS t(image_url)) TO '{manifest}' (FORMAT PARQUET)"
+    )
+
+    source = ParquetManifestSource(str(manifest))
+    found, absolute, missing = source.iter_files()
+
+    assert found.key == "scans/a.jpg"
+    assert source.read_bytes(found)[:3] == b"\xff\xd8\xff"
+    assert source.original_uri(found) == str(tmp_path / "scans" / "a.jpg")
+    assert source.read_bytes(absolute)[:3] == b"\xff\xd8\xff"
+    assert source.read_bytes(missing) is None
+
+
 def test_unreadable_manifest_explains_what_to_check(monkeypatch):
     from src.profiling import sources
 
