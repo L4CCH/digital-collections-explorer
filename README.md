@@ -11,6 +11,7 @@ The [project site](https://digital-collections-explorer.com/) has a live demo an
 ## What It Does
 
 - **Searches by meaning.** Natural-language queries and reverse image search over photographs, maps and PDFs, with an interface for each: `photographs`, `maps` and `documents`.
+- **Shows 3D models.** In the `photographs` interface, an object with a `.glb` model can be turned and zoomed on its page. Views drawn from the model join the search, and objects of similar shape can be found.
 - **Needs no metadata, and uses it when it exists.** A catalog groups images into objects, links each one to its record, and makes the records searchable beside the pictures.
 - **Scales on ordinary hardware.** Indexing reads from disk, S3 or a manifest without copying the originals, and serving needs no GPU.
 - **Is safe to put online.** Rate, upload and concurrency limits protect a small machine, and every refusal is explained in plain words.
@@ -32,6 +33,8 @@ DCE_DATA_DIR=data/collections/my-collection python -m src.backend.main
 ```
 
 Then open http://localhost:8000. The images can also come from an S3 prefix (add `--anonymous` for a public bucket) or a parquet manifest of image addresses, and `python -m src.profiling <source>` says beforehand what the collection holds and what indexing will cost. Indexing can be stopped and run again; it continues where it left off. Search uses SigLIP by default; SigLIP 2 and CLIP can be chosen in `config.json`.
+
+3D models are drawn before indexing: `python -m src.render3d render /path/to/models --data-dir data/collections/my-collection` takes a folder of `.glb` files or a manifest with a `model_url` column, and writes a manifest of views to index with `python -m src.ingest`. It needs Chromium once: `python -m playwright install chromium`.
 
 PDFs, for the `documents` interface, are indexed page by page with the older tool: put them in `data/raw`, run `python -m src.models.generate_embeddings`, then `python -m src.backend.main`.
 

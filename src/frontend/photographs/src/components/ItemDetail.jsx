@@ -3,10 +3,14 @@ import Lightbox from 'yet-another-react-lightbox';
 import Zoom from 'yet-another-react-lightbox/plugins/zoom';
 import 'yet-another-react-lightbox/styles.css';
 import CatalogText from './CatalogText';
+import CubeIcon from './CubeIcon';
 import ImageGrid from './ImageGrid';
+import ModelStage from './ModelStage';
 import RelatedSources from './RelatedSources';
 import { itemHref } from '../hooks/useHashRoute';
-import { getItem, getSimilar, imageUrl } from '../services/api';
+import {
+  getItem, getSimilar, getSimilarShape, imageUrl, modelUrl,
+} from '../services/api';
 import { plainText } from '../services/catalogText';
 import { titleOf } from '../services/items';
 import './ItemDetail.css';
@@ -42,12 +46,27 @@ function ItemDetail({ id, collection, canGoBack }) {
   const [object, setObject] = useState(null);
   const [currentId, setCurrentId] = useState(id);
   const [similar, setSimilar] = useState([]);
+  const [similarShapes, setSimilarShapes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [zoomIsOpen, setZoomIsOpen] = useState(false);
   const [unfolded, setUnfolded] = useState([]);
+  const [showModel, setShowModel] = useState(false);
 
   const photos = useMemo(() => object?.photos || [], [object]);
+  const model = object?.model;
+  const viewOrbits = useMemo(
+    () => new Map((object?.model?.views || []).map((view) => [view.id, view.orbit])),
+    [object],
+  );
+  const stills = useMemo(
+    () => photos.filter((photo) => !viewOrbits.has(photo.id)),
+    [photos, viewOrbits],
+  );
+  const entries = useMemo(
+    () => (model ? [{ id: null, isModel: true }, ...stills] : photos),
+    [model, stills, photos],
+  );
   const recordFields = useMemo(() => {
     const byLabel = new Map();
     (object?.record?.fields || []).forEach(({ label, value }) => {
@@ -59,8 +78,14 @@ function ItemDetail({ id, collection, canGoBack }) {
     () => Object.fromEntries((collection?.groups || []).map((group) => [group.id, group.label])),
     [collection],
   );
-  const currentIndex = Math.max(0, photos.findIndex((photo) => photo.id === currentId));
-  const current = photos[currentIndex];
+  const current = showModel
+    ? photos.find((photo) => photo.id === currentId) || photos[0]
+    : stills.find((photo) => photo.id === currentId) || stills[0] || photos[0];
+  const currentIndex = showModel
+    ? 0
+    : Math.max(0, entries.findIndex((entry) => entry.id === current?.id));
+  const stillIndex = Math.max(0, stills.findIndex((photo) => photo.id === current?.id));
+  const viewId = viewOrbits.has(currentId) ? currentId : model?.views?.[0]?.id;
 
   useEffect(() => {
     let isCurrent = true;
@@ -70,8 +95,11 @@ function ItemDetail({ id, collection, canGoBack }) {
     getItem(id)
       .then((loaded) => {
         if (isCurrent) {
+          const views = new Set((loaded.model?.views || []).map((view) => view.id));
+          const hasStills = (loaded.photos || []).some((photo) => !views.has(photo.id));
           setObject(loaded);
           setCurrentId(id);
+          setShowModel(Boolean(loaded.model) && (views.has(id) || !hasStills));
           setUnfolded([]);
         }
       })
@@ -94,26 +122,52 @@ function ItemDetail({ id, collection, canGoBack }) {
   }, [currentId]);
 
   useEffect(() => {
-    [photos[currentIndex - 1], photos[currentIndex + 1]].filter(Boolean).forEach((photo) => {
-      new Image().src = fullImage(photo.id);
-    });
-  }, [photos, currentIndex]);
+    let isCurrent = true;
+    setSimilarShapes([]);
+    if (model) {
+      getSimilarShape(id, SIMILAR_COUNT)
+        .then((loaded) => isCurrent && setSimilarShapes(loaded))
+        .catch(() => {});
+    }
+    return () => {
+      isCurrent = false;
+    };
+  }, [id, model]);
+
+  useEffect(() => {
+    [entries[currentIndex - 1], entries[currentIndex + 1]]
+      .filter((entry) => entry && !entry.isModel)
+      .forEach((photo) => {
+        new Image().src = fullImage(photo.id);
+      });
+  }, [entries, currentIndex]);
 
   const showPhoto = useCallback((photoId) => {
+    setShowModel(false);
     setCurrentId(photoId);
     window.history.replaceState(window.history.state, '', itemHref(photoId));
   }, []);
 
+  const showTheModel = useCallback(() => {
+    setShowModel(true);
+    if (viewId) {
+      setCurrentId(viewId);
+      window.history.replaceState(window.history.state, '', itemHref(viewId));
+    }
+  }, [viewId]);
+
   const step = useCallback((offset) => {
-    const next = photos[currentIndex + offset];
-    if (next) {
+    const next = entries[currentIndex + offset];
+    if (next?.isModel) {
+      showTheModel();
+    } else if (next) {
       showPhoto(next.id);
     }
-  }, [photos, currentIndex, showPhoto]);
+  }, [entries, currentIndex, showPhoto, showTheModel]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (zoomIsOpen || e.target.matches('input, textarea')) {
+      if (zoomIsOpen || e.target.matches('input, textarea') || e.target.closest?.('model-viewer')) {
         return;
       }
       if (e.key === 'ArrowLeft') {
@@ -150,10 +204,10 @@ function ItemDetail({ id, collection, canGoBack }) {
   const sourceName = collection?.source_name || (sourceUrl && hostnameOf(sourceUrl));
   const license = collection?.license;
   const groupLabel = groupLabels[metadata.group];
-  const hasSeveralPhotos = photos.length > 1;
-  const aspectRatio = metadata.width && metadata.height
-    ? metadata.width / metadata.height
-    : undefined;
+  const hasSeveralEntries = entries.length > 1;
+  const viewMetadata = photos.find((photo) => photo.id === viewId)?.metadata || {};
+  const shown = showModel ? viewMetadata : metadata;
+  const aspectRatio = shown.width && shown.height ? shown.width / shown.height : undefined;
 
   return (
     <article className={`item-detail ${isLoading ? 'item-detail-loading' : ''}`}>
@@ -173,15 +227,24 @@ function ItemDetail({ id, collection, canGoBack }) {
       <div className="item-detail-main">
         <div className="item-detail-viewer">
           <div className="item-detail-stage" style={{ '--ratio': aspectRatio }}>
-            <button
-              type="button"
-              className="item-detail-image"
-              onClick={() => setZoomIsOpen(true)}
-              aria-label="View larger"
-            >
-              <img src={fullImage(current.id)} alt={name || 'Uncataloged image'} />
-            </button>
-            {hasSeveralPhotos && (
+            {showModel ? (
+              <ModelStage
+                src={model.url || modelUrl(model.id)}
+                orbit={viewOrbits.get(viewId)}
+                poster={viewId ? fullImage(viewId) : undefined}
+                alt={name ? `3D model of ${name}` : '3D model'}
+              />
+            ) : (
+              <button
+                type="button"
+                className="item-detail-image"
+                onClick={() => setZoomIsOpen(true)}
+                aria-label="View larger"
+              >
+                <img src={fullImage(current.id)} alt={name || 'Uncataloged image'} />
+              </button>
+            )}
+            {hasSeveralEntries && (
               <>
                 <button
                   type="button"
@@ -196,37 +259,54 @@ function ItemDetail({ id, collection, canGoBack }) {
                   type="button"
                   className="item-detail-step item-detail-step-next"
                   onClick={() => step(1)}
-                  disabled={currentIndex === photos.length - 1}
+                  disabled={currentIndex === entries.length - 1}
                   aria-label="Next photo"
                 >
                   <Chevron direction="right" />
                 </button>
                 <span className="item-detail-count" aria-hidden="true">
-                  {currentIndex + 1} / {photos.length}
+                  {currentIndex + 1} / {entries.length}
                 </span>
               </>
             )}
           </div>
 
-          {hasSeveralPhotos && (
+          {hasSeveralEntries && (
             <div className="item-detail-photos">
               <ul>
-                {photos.map((photo, index) => (
-                  <li key={photo.id}>
-                    <a
-                      href={itemHref(photo.id)}
-                      className={photo.id === current.id ? 'is-current' : ''}
-                      aria-current={photo.id === current.id ? 'true' : undefined}
-                      aria-label={`Photo ${index + 1} of ${photos.length}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        showPhoto(photo.id);
-                      }}
-                    >
-                      <img src={thumbnail(photo.id)} alt="" loading="lazy" />
-                    </a>
-                  </li>
-                ))}
+                {entries.map((entry, index) => {
+                  const isShown = entry.isModel ? showModel : !showModel && entry.id === current.id;
+                  const href = itemHref(entry.isModel ? viewId || model.id : entry.id);
+                  const photoNumber = index + (model ? 0 : 1);
+                  const classes = [isShown && 'is-current', entry.isModel && 'item-detail-model-tile'];
+                  return (
+                    <li key={entry.id || 'model'}>
+                      <a
+                        href={href}
+                        className={classes.filter(Boolean).join(' ') || undefined}
+                        aria-current={isShown ? 'true' : undefined}
+                        aria-label={entry.isModel ? '3D model' : `Photo ${photoNumber} of ${stills.length}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (entry.isModel) {
+                            showTheModel();
+                          } else {
+                            showPhoto(entry.id);
+                          }
+                        }}
+                      >
+                        {entry.isModel ? (
+                          <>
+                            {viewId && <img src={thumbnail(viewId)} alt="" loading="lazy" />}
+                            <span className="item-detail-model-mark"><CubeIcon />3D</span>
+                          </>
+                        ) : (
+                          <img src={thumbnail(entry.id)} alt="" loading="lazy" />
+                        )}
+                      </a>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -289,14 +369,14 @@ function ItemDetail({ id, collection, canGoBack }) {
                 <dd>{current.object_id}</dd>
               </>
             )}
-            {metadata.width && metadata.height && (
+            {!showModel && metadata.width && metadata.height && (
               <>
                 <dt>Original size</dt>
                 <dd>{metadata.width.toLocaleString()} × {metadata.height.toLocaleString()} px</dd>
               </>
             )}
             <dt>File</dt>
-            <dd>{metadata.file_name}</dd>
+            <dd>{showModel ? model.file_name : metadata.file_name}</dd>
           </dl>
 
           {license && (
@@ -319,12 +399,19 @@ function ItemDetail({ id, collection, canGoBack }) {
         </section>
       )}
 
+      {similarShapes.length > 0 && (
+        <section>
+          <h3>Similar in shape</h3>
+          <ImageGrid items={similarShapes} groupLabels={groupLabels} />
+        </section>
+      )}
+
       <Lightbox
         open={zoomIsOpen}
         close={() => setZoomIsOpen(false)}
-        index={currentIndex}
-        slides={photos.map((photo) => ({ src: fullImage(photo.id), alt: name || '' }))}
-        on={{ view: ({ index }) => photos[index] && showPhoto(photos[index].id) }}
+        index={stillIndex}
+        slides={stills.map((photo) => ({ src: fullImage(photo.id), alt: name || '' }))}
+        on={{ view: ({ index }) => stills[index] && showPhoto(stills[index].id) }}
         plugins={[Zoom]}
         carousel={{ finite: true }}
       />

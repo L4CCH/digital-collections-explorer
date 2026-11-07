@@ -217,8 +217,12 @@ function App() {
           <>
             {collection.description && <p>{collection.description}</p>}
             <p className="App-header-counts">
-              {collection.objects.toLocaleString()} objects · {collection.images.toLocaleString()} images
-              {collection.source_name ? ` · from ${collection.source_name}` : ''}
+              {[
+                `${collection.objects.toLocaleString()} objects`,
+                (collection.images > 0 || !collection.models) && `${collection.images.toLocaleString()} images`,
+                collection.models > 0 && `${collection.models.toLocaleString()} 3D models`,
+                collection.source_name && `from ${collection.source_name}`,
+              ].filter(Boolean).join(' · ')}
             </p>
           </>
         )}

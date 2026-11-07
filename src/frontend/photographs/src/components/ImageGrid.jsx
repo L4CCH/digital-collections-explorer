@@ -1,5 +1,6 @@
 import React from 'react';
 import CatalogText from './CatalogText';
+import CubeIcon from './CubeIcon';
 import { itemHref } from '../hooks/useHashRoute';
 import { imageUrl } from '../services/api';
 import { plainText } from '../services/catalogText';
@@ -32,6 +33,7 @@ const ImageGrid = React.memo(({ items, size = 'regular', groupLabels = {} }) => 
       const title = titleOf(item);
       const name = plainText(title);
       const photoCount = item.image_count || 1;
+      const hasModel = Boolean(item.metadata?.model_url);
       const groupLabel = groupLabels[item.metadata?.group];
 
       return (
@@ -43,10 +45,20 @@ const ImageGrid = React.memo(({ items, size = 'regular', groupLabels = {} }) => 
               {groupLabel && <span className="image-grid-group">{groupLabel}</span>}
               {item.explanation && <span className="image-grid-why">{item.explanation}</span>}
             </span>
-            {photoCount > 1 && (
-              <span className="image-grid-badge">
-                <PhotosIcon />
-                {photoCount} photos
+            {(photoCount > 1 || hasModel) && (
+              <span className="image-grid-badges">
+                {hasModel && (
+                  <span className="image-grid-badge">
+                    <CubeIcon />
+                    3D
+                  </span>
+                )}
+                {photoCount > 1 && (
+                  <span className="image-grid-badge">
+                    <PhotosIcon />
+                    {photoCount} photos
+                  </span>
+                )}
               </span>
             )}
           </a>

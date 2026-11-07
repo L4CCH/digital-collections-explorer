@@ -23,7 +23,11 @@ class SearchResult(BaseModel):
     object_id: Optional[str] = Field(
         None, description="The object this image belongs to; results show each once"
     )
-    image_count: int = Field(1, description="How many images the object has in total")
+    image_count: int = Field(
+        1,
+        description="How many photos the object has, not counting views rendered "
+        "from its 3D model",
+    )
     provenance: Optional[Dict[str, Any]] = Field(
         None,
         description="Rank of the object in each channel, the record fields that matched, "

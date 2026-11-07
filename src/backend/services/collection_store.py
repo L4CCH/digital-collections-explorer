@@ -19,7 +19,8 @@ VECTORS_DIR = "vectors"
 
 ITEMS_QUERY = """
     SELECT i.id, i.group_id, i.record_id, i.file_name, i.width, i.height,
-           i.thumbnail, i.processed, i.original, r.title, r.source_url
+           i.thumbnail, i.processed, i.original, r.title, r.source_url,
+           {view_orbit}, {model_url}
     FROM items i LEFT JOIN records r ON r.record_id = i.record_id
 """
 FIELDS_QUERY = (
@@ -123,7 +124,15 @@ def read_grouped_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
     """Describe every image from the items and records tables of metadata.sqlite"""
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        rows = con.execute(ITEMS_QUERY).fetchall()
+        query = ITEMS_QUERY.format(
+            view_orbit=(
+                "i.view_orbit" if "view_orbit" in columns(con, "items") else "NULL"
+            ),
+            model_url=(
+                "r.model_url" if "model_url" in columns(con, "records") else "NULL"
+            ),
+        )
+        rows = con.execute(query).fetchall()
     finally:
         con.close()
     metadata = {}
@@ -139,6 +148,8 @@ def read_grouped_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
         original,
         title,
         source_url,
+        view_orbit,
+        model_url,
     ) in rows:
         paths = {"thumbnail": thumbnail, "processed": processed, "original": original}
         described = {
@@ -151,9 +162,16 @@ def read_grouped_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
             "object_id": record_id,
             "group": group_id,
             "paths": {k: v for k, v in paths.items() if v},
+            "model_url": model_url,
+            "view_orbit": view_orbit,
         }
         metadata[item_id] = {k: v for k, v in described.items() if v is not None}
     return metadata
+
+
+def columns(con: sqlite3.Connection, table: str) -> set:
+    """The column names of a table in metadata.sqlite"""
+    return {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
 
 
 def has_table(path: Path, name: str) -> bool:

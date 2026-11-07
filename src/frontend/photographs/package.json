@@ -9,8 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/model-viewer": "^4.4.0",
     "react": "^18.2.15",
     "react-dom": "^18.2.15",
+    "three": "^0.183.2",
     "yet-another-react-lightbox": "^3.12.0"
   },
   "devDependencies": {

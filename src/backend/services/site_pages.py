@@ -70,6 +70,8 @@ def llms_txt(collection: Dict[str, Any], base_path: str = "") -> str:
         counts.append(f"{collection['objects']:,} objects")
     if counts:
         lines += [f"This site holds {' in '.join(counts)}.", ""]
+    if collection.get("models"):
+        lines += [f"{collection['models']:,} of the objects have 3D models.", ""]
     if collection.get("source_name"):
         lines += [f"The images come from {collection['source_name']}.", ""]
     license_info = collection.get("license") or {}

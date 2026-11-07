@@ -169,6 +169,38 @@ Add `--limit N` for a sample run.
 - `$PY -m src.ingest --report --data-dir data/collections/NAME` prints how the run
   went in plain words at any time, including for a run that finished long ago.
 
+### 3D models
+
+If the collection holds `.glb` models (the profile counts them among the files
+that are not images), or its manifest has a `model_url` column, render the
+models before building the index:
+
+```bash
+$PY -m playwright install chromium
+$PY -m src.render3d render SOURCE --data-dir data/collections/NAME
+```
+
+This draws views of each model for the search, keeps them under
+`data/collections/NAME/models3d`, and writes a manifest listing those views and
+the collection's photos. Build the index from that manifest instead of SOURCE:
+
+```bash
+$PY -m src.ingest data/collections/NAME/models3d/views.parquet \
+  --data-dir data/collections/NAME
+```
+
+- Each model gets a viewer on its object's page, and its views can be found by
+  description and by example image like any photo.
+- Views showing too little of a model, such as the bare back of a relief, are
+  left out. Tell the person how many views each model kept if some kept few.
+- It also builds the shape index behind "Similar in shape". The first run
+  downloads an image model of about 350 MB. Add `--no-shape` to skip it.
+- Only `.glb` files are shown. Models in other formats (`.obj`, `.ply`, `.fbx`,
+  `.gltf` kept on disk) are listed as left out. Say so, and say that exporting
+  them as glTF binary from Blender makes them usable.
+- A model hosted elsewhere is shown from where it lives, so its server must
+  allow other sites to load it. Smithsonian 3D does.
+
 ## Step 6. Start the site
 
 The summary's `serve_command` is the command to run. Port 8000 is the default.

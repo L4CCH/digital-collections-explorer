@@ -14,7 +14,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFile
 
-from src.backend.services.catalog_fields import object_id_from, source_url_from
+from src.backend.services.catalog_fields import (
+    model_url_from,
+    object_id_from,
+    source_url_from,
+    view_orbit_from,
+)
 from src.profiling.sources import FileRef, Source
 
 from .state import IngestState, Result
@@ -209,6 +214,12 @@ def decode_worker(
                 item.metadata["catalog"] = catalog
                 item.metadata["object_id"] = object_id_from(catalog)
                 item.metadata["source_url"] = source_url_from(catalog)
+                model_url = model_url_from(catalog)
+                if model_url:
+                    item.metadata["model_url"] = model_url
+                view_orbit = view_orbit_from(catalog)
+                if view_orbit:
+                    item.metadata["view_orbit"] = view_orbit
                 for shown_by_frontend in ("title", "description"):
                     if catalog.get(shown_by_frontend):
                         item.metadata[shown_by_frontend] = str(
