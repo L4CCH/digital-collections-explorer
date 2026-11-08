@@ -25,8 +25,6 @@ DOCUMENT_EXTS = {"pdf"}
 MODEL_EXTS = {"glb", "gltf"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini", ".picasa.ini"}
 JUNK_DIRS = {".git", "__pycache__", ".cache", "node_modules", ".thumbnails"}
-MODEL_COLUMNS = ("model_url", "model", "glb", "gltf", "3d_model")
-IIIF_COLUMNS = ("iiif", "iiif_url", "iiif_image", "iiif_service", "iiif_info")
 URL_COLUMN_GUESSES = ["image_url", "url", "path", "file", "uri"]
 SIZE_COLUMN_GUESSES = ["size_bytes", "size", "bytes", "filesize"]
 JPEG_MAGIC = b"\xff\xd8\xff"
@@ -109,6 +107,10 @@ class Source:
 
     def original_uri(self, ref: FileRef) -> str:
         raise NotImplementedError
+
+    def local_address(self, value: str) -> str:
+        """Where a file the catalog names by path is on this machine"""
+        return value
 
     def catalog_rows(self) -> tuple[list[str], list[tuple]] | None:
         return None
@@ -361,6 +363,9 @@ class ParquetManifestSource(Source):
             return f"s3://{self.s3_bucket}/{ref.key}"
         url = ref.extra.get("url", ref.key)
         return self._local_file(url) or url
+
+    def local_address(self, value):
+        return self._local_file(value) or value
 
     def catalog_rows(self):
         return self.columns, self._load()

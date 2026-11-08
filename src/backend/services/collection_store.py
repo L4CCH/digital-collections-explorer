@@ -74,11 +74,27 @@ def load_single(embeddings_dir: Path) -> Optional[LoadedIndex]:
     item_ids = torch.load(item_ids_path)
     if metadata_path.exists():
         with open(metadata_path, "r") as f:
-            metadata = json.load(f)
+            metadata = upgrade_old_pages(json.load(f))
     else:
         metadata = {}
         logger.warning("Metadata file not found, proceeding without metadata.")
     return LoadedIndex(embeddings, item_ids, metadata)
+
+
+def upgrade_old_pages(metadata: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Give PDF pages from indexes made before version 2 the fields pages have now"""
+    for item in metadata.values():
+        if item.get("type") != "pdf_page" or "document_key" in item:
+            continue
+        if "n_pages" not in item:
+            continue
+        original = (item.get("paths") or {}).get("original")
+        item["document_key"] = original or item.get("file_name")
+        item["pages"] = item["n_pages"]
+        item["page"] = int(item.get("page") or 0) + 1
+        if original:
+            item.setdefault("document", original)
+    return metadata
 
 
 def load_grouped(embeddings_dir: Path, model_name: str) -> LoadedIndex:

@@ -18,6 +18,7 @@ from src.backend.services.catalog_fields import (
     iiif_info_from,
     model_url_from,
     object_id_from,
+    servable_model,
     source_url_from,
     view_orbit_from,
 )
@@ -227,11 +228,18 @@ def download_worker(
             results.put(failure(item, "download", error))
 
 
-def catalog_metadata(catalog: dict | None) -> dict:
+def model_address(catalog: dict, source: Source) -> str | None:
+    address = model_url_from(catalog)
+    if address and "://" not in address:
+        address = source.local_address(address)
+    return servable_model(address)
+
+
+def catalog_metadata(catalog: dict | None, source: Source) -> dict:
     if not catalog:
         return {}
     optional = {
-        "model_url": model_url_from(catalog),
+        "model_url": model_address(catalog, source),
         "view_orbit": view_orbit_from(catalog),
         "iiif": iiif_info_from(catalog),
         **{
@@ -287,7 +295,7 @@ def decode_image(source: Source, options: Options, item: Item) -> None:
             "original": original if os.path.exists(original) else copies["processed"],
             **copies,
         },
-        **catalog_metadata(item.ref.extra.get("row")),
+        **catalog_metadata(item.ref.extra.get("row"), source),
     }
     item.image = model_input(image)
 
@@ -319,7 +327,7 @@ def split_document(
         "source_uri": original,
         **({"document": original} if can_be_opened(original) else {}),
         "document_key": item.ref.key,
-        **catalog_metadata(catalog),
+        **catalog_metadata(catalog, source),
     }
     error = None
     try:

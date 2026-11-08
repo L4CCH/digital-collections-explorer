@@ -120,7 +120,10 @@ def list_manifest(path: str) -> Listing:
                     Model(address, object_id_from(row) or stem, carried)
                 )
         if image and not is_model_address(image):
-            listing.photos.append({**row, IMAGE_COLUMN: absolute(image, base)})
+            photo = {**row, IMAGE_COLUMN: absolute(image, base)}
+            if address:
+                photo["model_url"] = address
+            listing.photos.append(photo)
     return listing
 
 

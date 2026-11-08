@@ -8,6 +8,8 @@ from collections import Counter, defaultdict
 
 from PIL import Image, ImageFile
 
+from src.backend.core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS
+
 from .models import (
     Capabilities,
     Capability,
@@ -23,7 +25,7 @@ from .models import (
     Sizing,
     Structure,
 )
-from .sources import IIIF_COLUMNS, MODEL_COLUMNS, MODEL_EXTS, FileRef, Source
+from .sources import MODEL_EXTS, FileRef, Source
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Largest image seen in the Smithsonian NMAH collection was 123 megapixels.
@@ -727,9 +729,9 @@ def build_decisions(stats: ScanStats, structure: Structure) -> list[Decision]:
 def media_needed(stats: ScanStats, fields: list[FieldProfile]) -> list[str]:
     columns = {field.name.lower() for field in fields}
     needed = {
-        "3d": bool(stats.model_files or columns & set(MODEL_COLUMNS)),
+        "3d": bool(stats.model_files or columns & set(MODEL_URL_KEYS)),
         "pdf": bool(stats.document_files),
-        "zoom": bool(columns & set(IIIF_COLUMNS)),
+        "zoom": bool(columns & set(IIIF_KEYS)),
     }
     return [medium for medium, is_needed in needed.items() if is_needed]
 

@@ -11,7 +11,12 @@ from urllib.parse import urlparse
 import torch
 
 from ..core.config import settings
-from .catalog_fields import iiif_info_from, object_id_from, source_url_from
+from .catalog_fields import (
+    iiif_info_from,
+    object_id_from,
+    servable_model,
+    source_url_from,
+)
 from .catalog_filter import can_filter
 from .collection_store import METADATA_DB, has_table, read_record_details
 from .embedding_service import EmbeddingService, embedding_service
@@ -76,7 +81,7 @@ class CollectionService:
             self.object_ids.append(object_id)
             self.members.setdefault(object_id, []).append(index)
             cataloged.append(bool(record))
-            if metadata.get("model_url"):
+            if servable_model(metadata.get("model_url")):
                 self.object_model.setdefault(object_id, index)
             if metadata.get("view_orbit"):
                 self.view_rows.add(index)
@@ -108,7 +113,11 @@ class CollectionService:
             for o, members in self.members.items()
             if self.row_group
         }
-        images = Counter(self.row_group)
+        images = Counter(
+            group
+            for row, group in enumerate(self.row_group)
+            if row not in self.view_rows and row not in self.page_rows
+        )
         objects = Counter(n for found in self.object_groups.values() for n in found)
         self.groups = [
             {
@@ -209,11 +218,8 @@ class CollectionService:
     def first_image(self, object_id: str, groups: Optional[List[str]] = None) -> int:
         """The row of an object's first image in the given groups"""
         self._ensure_index()
-        numbers = self._numbers(groups)
-        members = self.members[object_id]
-        if numbers is not None and self.row_group:
-            members = [m for m in members if self.row_group[m] in numbers] or members
-        return members[0]
+        numbers = self._numbers(groups) if self.row_group else None
+        return self.shown_rows(object_id, numbers)[0]
 
     def ranked_objects(
         self,
@@ -259,13 +265,17 @@ class CollectionService:
         catalog = metadata.get("catalog")
         metadata.setdefault("title", (catalog or {}).get("title"))
         metadata.setdefault("source_url", source_url_from(catalog))
-        if "iiif" not in metadata and iiif_info_from(catalog):
-            metadata["iiif"] = iiif_info_from(catalog)
+        if "iiif" not in metadata:
+            iiif = iiif_info_from(catalog)
+            if iiif:
+                metadata["iiif"] = iiif
         object_id = self.object_ids[index]
         if object_id in self.object_model:
             metadata.setdefault(
                 "model_url", self._metadata(self.object_model[object_id])["model_url"]
             )
+        else:
+            metadata.pop("model_url", None)
         return {
             "id": item_id,
             "score": score if score is not None else 0.0,
@@ -320,7 +330,11 @@ class CollectionService:
         described["documents"] = len(self.documents)
         described["models"] = len(self.object_model)
         described["objects"] = len(self.members)
-        described["uncataloged_images"] = int((~self.cataloged_rows).sum())
+        described["uncataloged_images"] = sum(
+            1
+            for row in torch.nonzero(~self.cataloged_rows).flatten().tolist()
+            if row not in self.view_rows and row not in self.page_rows
+        )
         index = read_index_info(self.embeddings.embeddings_dir) or {}
         described["groups"] = self.group_summary()
         described["catalog_search"] = is_grouped(index) and has_table(

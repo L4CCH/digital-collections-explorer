@@ -4,17 +4,15 @@ import re
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
+from ..core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS
+
 OBJECT_ID_KEYS = ("object_id", "record_id", "item_id", "group_id")
 
 SOURCE_URL_KEYS = ("source_url", "guid", "record_url", "landing_page", "permalink")
 
-MODEL_URL_KEYS = ("model_url", "model", "glb", "gltf", "3d_model")
-
 MODEL_EXTENSIONS = (".glb", ".gltf")
 
 VIEW_ORBIT_KEY = "view_orbit"
-
-IIIF_KEYS = ("iiif", "iiif_url", "iiif_image", "iiif_service", "iiif_info")
 
 IIIF_IMAGE_REQUEST = re.compile(
     r"/(full|square|pct:[^/]+|\d+,\d+,\d+,\d+)/[^/]+/!?\d+(\.\d+)?"
@@ -48,6 +46,17 @@ def model_url_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
         if urlparse(value).path.lower().endswith(MODEL_EXTENSIONS):
             return value
     return None
+
+
+def servable_model(address: Optional[str]) -> Optional[str]:
+    """The model's address if the site can show it: on the web, or a .glb kept here"""
+    if not address:
+        return None
+    if address.startswith(("http://", "https://")):
+        return address
+    if "://" in address or not address.lower().endswith(".glb"):
+        return None
+    return address
 
 
 def view_orbit_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
