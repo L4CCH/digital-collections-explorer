@@ -13,6 +13,7 @@ from src.backend.services.embedding_service_factory import create_embedding_serv
 from src.backend.services.index_info import KNOWN_DIMENSIONS
 from src.profiling.sources import open_source
 
+from .documents import INSTALL_HINT, can_read_pdfs
 from .export import export_for_backend
 from .pipeline import Options, clock, make_item_id, run
 from .report import cloud_machine_type, render_report, run_report
@@ -143,6 +144,15 @@ def summary(state: IngestState, embeddings_dir: Path, data_dir: str | None) -> d
     }
 
 
+def readable_files(refs: list) -> tuple[list, str | None]:
+    """The files this install can read, and how many PDFs it has to leave out"""
+    documents = sum(1 for ref in refs if ref.is_document)
+    if not documents or can_read_pdfs():
+        return refs, None
+    unread = f"{documents:,} PDF{'' if documents == 1 else 's'}"
+    return [ref for ref in refs if not ref.is_document], unread
+
+
 def foreign_index_exists(embeddings_dir: Path) -> bool:
     return (embeddings_dir / "embeddings.pt").exists() and not (
         embeddings_dir / STATE_FILE
@@ -195,10 +205,14 @@ def main() -> int:
         return 2
     state.remember("model_name", settings.model_name)
 
-    print(f"Listing images in {args.uri} ...")
+    print(f"Listing images and PDFs in {args.uri} ...")
     source = open_source(args.uri, anonymous=args.anonymous, fetch_via=args.fetch_via)
     refs = sorted(
-        (ref for ref in source.iter_files() if ref.is_image and not ref.is_junk),
+        (
+            ref
+            for ref in source.iter_files()
+            if (ref.is_image or ref.is_document) and not ref.is_junk
+        ),
         key=lambda ref: ref.key,
     )
     if args.limit:
@@ -207,15 +221,24 @@ def main() -> int:
         print("No images found.")
         state.close()
         return 2
+    refs, unread = readable_files(refs)
+    if unread and not refs:
+        print(f"Found {unread}. Reading them needs one more package:\n  {INSTALL_HINT}")
+        state.close()
+        return 2
+    if unread:
+        print(f"Leaving out {unread}. Reading them needs one more package:")
+        print(f"  {INSTALL_HINT}")
+    documents = sum(1 for ref in refs if ref.is_document)
 
     ids = [make_item_id(ref.key) for ref in refs]
     state.seed([(item_id, ref.key, ref.size) for item_id, ref in zip(ids, refs)])
     finished = state.finished_ids(ids, args.retry_failed)
     pending = [ref for item_id, ref in zip(ids, refs) if item_id not in finished]
-    print(
-        f"Found {len(refs):,} images. {len(finished):,} already indexed, "
-        f"{len(pending):,} to go."
+    found = f"{len(refs) - documents:,} images" + (
+        f" and {documents:,} PDF{'' if documents == 1 else 's'}" if documents else ""
     )
+    print(f"Found {found}. {len(finished):,} already indexed, {len(pending):,} to go.")
 
     if pending:
         settings.device = DeviceType(

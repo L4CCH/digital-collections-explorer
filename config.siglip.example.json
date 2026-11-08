@@ -1,5 +1,6 @@
 {
-  "collection_type": "photographs",
+  "frontend": "default",
+  "media": [],
   "raw_data_dir": "data/raw",
   "processed_data_dir": "data/processed",
   "embeddings_dir": "data/embeddings",

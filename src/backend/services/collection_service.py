@@ -6,15 +6,22 @@ import random
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 import torch
 
 from ..core.config import settings
-from .catalog_fields import object_id_from, source_url_from
+from .catalog_fields import (
+    iiif_info_from,
+    object_id_from,
+    servable_model,
+    source_url_from,
+)
 from .catalog_filter import can_filter
 from .collection_store import METADATA_DB, has_table, read_record_details
 from .embedding_service import EmbeddingService, embedding_service
 from .index_info import is_grouped, read_index_info
+from .shape_index import ShapeIndex
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,12 @@ class CollectionService:
         self.cataloged_rows: Optional[torch.Tensor] = None
         self.object_number: Dict[str, int] = {}
         self.row_object: Optional[torch.Tensor] = None
+        self.object_model: Dict[str, int] = {}
+        self.view_rows: Set[int] = set()
+        self.page_rows: Set[int] = set()
+        self.documents: Set[str] = set()
+        self.photo_count: Dict[str, int] = {}
+        self.shapes = ShapeIndex()
 
     def _ensure_index(self) -> None:
         if not self.embeddings.is_loaded:
@@ -55,17 +68,30 @@ class CollectionService:
         if len(item_ids) == self.indexed_count:
             return
         self.position, self.object_ids, self.members = {}, [], {}
+        self.object_model, self.view_rows = {}, set()
+        self.page_rows, self.documents = set(), set()
         cataloged: List[bool] = []
         for index, item_id in enumerate(item_ids):
             metadata = (self.embeddings.metadata or {}).get(item_id, {})
             record = metadata.get("object_id") or object_id_from(
                 metadata.get("catalog")
             )
-            object_id = record or item_id
+            object_id = record or metadata.get("document_key") or item_id
             self.position[item_id] = index
             self.object_ids.append(object_id)
             self.members.setdefault(object_id, []).append(index)
             cataloged.append(bool(record))
+            if servable_model(metadata.get("model_url")):
+                self.object_model.setdefault(object_id, index)
+            if metadata.get("view_orbit"):
+                self.view_rows.add(index)
+            if metadata.get("type") == "pdf_page":
+                self.page_rows.add(index)
+                self.documents.add(metadata.get("document_key") or object_id)
+        self.photo_count = {
+            o: sum(1 for m in members if m not in self.view_rows)
+            for o, members in self.members.items()
+        }
         self.cataloged_rows = torch.tensor(cataloged, dtype=torch.bool)
         self.object_number = {o: n for n, o in enumerate(self.members)}
         self.row_object = torch.tensor(
@@ -87,7 +113,11 @@ class CollectionService:
             for o, members in self.members.items()
             if self.row_group
         }
-        images = Counter(self.row_group)
+        images = Counter(
+            group
+            for row, group in enumerate(self.row_group)
+            if row not in self.view_rows and row not in self.page_rows
+        )
         objects = Counter(n for found in self.object_groups.values() for n in found)
         self.groups = [
             {
@@ -188,11 +218,8 @@ class CollectionService:
     def first_image(self, object_id: str, groups: Optional[List[str]] = None) -> int:
         """The row of an object's first image in the given groups"""
         self._ensure_index()
-        numbers = self._numbers(groups)
-        members = self.members[object_id]
-        if numbers is not None and self.row_group:
-            members = [m for m in members if self.row_group[m] in numbers] or members
-        return members[0]
+        numbers = self._numbers(groups) if self.row_group else None
+        return self.shown_rows(object_id, numbers)[0]
 
     def ranked_objects(
         self,
@@ -227,21 +254,65 @@ class CollectionService:
         self._ensure_index()
         return [dict(group) for group in self.groups]
 
+    def _metadata(self, index: int) -> Dict[str, Any]:
+        item_id = self.embeddings.item_ids[index]
+        return (self.embeddings.metadata or {}).get(item_id, {})
+
     def present(self, index: int, score: Optional[float] = None) -> Dict[str, Any]:
         """Describe one image the way the site shows it"""
         item_id = self.embeddings.item_ids[index]
-        metadata = dict((self.embeddings.metadata or {}).get(item_id, {}))
+        metadata = dict(self._metadata(index))
         catalog = metadata.get("catalog")
         metadata.setdefault("title", (catalog or {}).get("title"))
         metadata.setdefault("source_url", source_url_from(catalog))
+        if "iiif" not in metadata:
+            iiif = iiif_info_from(catalog)
+            if iiif:
+                metadata["iiif"] = iiif
         object_id = self.object_ids[index]
+        if object_id in self.object_model:
+            metadata.setdefault(
+                "model_url", self._metadata(self.object_model[object_id])["model_url"]
+            )
+        else:
+            metadata.pop("model_url", None)
         return {
             "id": item_id,
             "score": score if score is not None else 0.0,
             "metadata": metadata,
             "object_id": object_id,
-            "image_count": len(self.members[object_id]),
+            "image_count": self.photo_count[object_id],
         }
+
+    def model_of(self, object_id: str) -> Optional[Dict[str, Any]]:
+        """Where an object's 3D model is kept, and the views rendered from it"""
+        self._ensure_index()
+        row = self.object_model.get(object_id)
+        if row is None:
+            return None
+        item_ids = self.embeddings.item_ids
+        address = self._metadata(row)["model_url"]
+        return {
+            "id": item_ids[row],
+            "url": address if address.startswith(("http://", "https://")) else None,
+            "file_name": Path(urlparse(address).path).name,
+            "views": [
+                {"id": item_ids[m], "orbit": self._metadata(m)["view_orbit"]}
+                for m in self.members[object_id]
+                if m in self.view_rows
+            ],
+        }
+
+    def shown_rows(
+        self, object_id: str, numbers: Optional[Set[int]] = None
+    ) -> List[int]:
+        """The rows that may stand for an object: its photos, or else its first view"""
+        members = [
+            m
+            for m in self.members[object_id]
+            if numbers is None or self.row_group[m] in numbers
+        ] or self.members[object_id]
+        return [m for m in members if m not in self.view_rows] or members[:1]
 
     def info(self) -> Dict[str, Any]:
         """Describe the collection: its name, size, and suggested searches"""
@@ -253,9 +324,17 @@ class CollectionService:
                 described.update(json.loads(path.read_text()))
             except (OSError, ValueError, TypeError) as e:
                 logger.warning(f"Ignoring unreadable {path}: {e}")
-        described["images"] = self.indexed_count
+        described["images"] = (
+            self.indexed_count - len(self.view_rows) - len(self.page_rows)
+        )
+        described["documents"] = len(self.documents)
+        described["models"] = len(self.object_model)
         described["objects"] = len(self.members)
-        described["uncataloged_images"] = int((~self.cataloged_rows).sum())
+        described["uncataloged_images"] = sum(
+            1
+            for row in torch.nonzero(~self.cataloged_rows).flatten().tolist()
+            if row not in self.view_rows and row not in self.page_rows
+        )
         index = read_index_info(self.embeddings.embeddings_dir) or {}
         described["groups"] = self.group_summary()
         described["catalog_search"] = is_grouped(index) and has_table(
@@ -283,13 +362,7 @@ class CollectionService:
         chosen = objects[offset : offset + limit]
         return [
             self.present(
-                random.Random(f"{seed}:{o}").choice(
-                    [
-                        m
-                        for m in self.members[o]
-                        if numbers is None or self.row_group[m] in numbers
-                    ]
-                )
+                random.Random(f"{seed}:{o}").choice(self.shown_rows(o, numbers))
             )
             for o in chosen
         ]
@@ -314,6 +387,9 @@ class CollectionService:
         described["photos"] = [
             self.present(member) for member in self.members[self.object_ids[index]]
         ]
+        model = self.model_of(described["object_id"])
+        if model:
+            described["model"] = model
         if self.groups:
             described["record"] = read_record_details(
                 Path(self.embeddings.embeddings_dir) / METADATA_DB,
@@ -342,6 +418,36 @@ class CollectionService:
             groups=groups,
             records=records,
         )
+
+    def similar_in_shape(
+        self,
+        item_id: str,
+        limit: int,
+        groups: Optional[List[str]] = None,
+        records: Optional[Set[str]] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Return other objects whose 3D models are most like this one's in form"""
+        self._ensure_index()
+        index = self.position.get(item_id)
+        if index is None:
+            return None
+        neighbors = self.shapes.neighbors(
+            Path(self.embeddings.embeddings_dir), self.object_ids[index]
+        )
+        numbers = self._numbers(groups)
+        results: List[Dict[str, Any]] = []
+        for object_id, score in neighbors or []:
+            if object_id not in self.members:
+                continue
+            groups_match = numbers is None or self.object_groups[object_id] & numbers
+            if not groups_match or (records is not None and object_id not in records):
+                continue
+            views = [m for m in self.members[object_id] if m in self.view_rows]
+            shown = views[0] if views else self.shown_rows(object_id, numbers)[0]
+            results.append(self.present(shown, score))
+            if len(results) >= limit:
+                break
+        return results
 
     def ranked(
         self,

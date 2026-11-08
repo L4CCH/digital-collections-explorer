@@ -45,8 +45,14 @@ def test_name_template_keeps_hashes_whole():
 
 def test_counts_images_and_other_files(profile):
     assert profile.scan.image_files == 13
-    assert profile.scan.non_image_files == 2
+    assert profile.scan.document_files == 1
+    assert profile.scan.non_image_files == 1
     assert any(issue.kind == "corrupt" for issue in profile.scan.issues)
+
+
+def test_a_folder_with_pdfs_asks_for_the_pdf_option(profile):
+    assert profile.media == ["pdf"]
+    assert not any(".pdf" in issue.note for issue in profile.scan.issues)
 
 
 def test_exif_dates_become_a_file_derived_filter(profile):
@@ -134,6 +140,31 @@ def test_private_manifest_is_read_even_when_images_are_anonymous(monkeypatch, tm
     )
     assert attempts == [True, False]
     assert Path(local).read_bytes() == b"parquet"
+
+
+def test_a_manifest_can_list_files_on_this_machine_relative_to_itself(tmp_path):
+    import duckdb
+
+    from src.profiling.sources import ParquetManifestSource
+
+    (tmp_path / "scans").mkdir()
+    Image.new("RGB", (4, 4)).save(tmp_path / "scans" / "a.jpg")
+    elsewhere = tmp_path / "b.jpg"
+    Image.new("RGB", (4, 4)).save(elsewhere)
+    manifest = tmp_path / "manifest.parquet"
+    duckdb.execute(
+        f"COPY (SELECT * FROM (VALUES ('scans/a.jpg'), ('{elsewhere}'), "
+        f"('scans/missing.jpg')) AS t(image_url)) TO '{manifest}' (FORMAT PARQUET)"
+    )
+
+    source = ParquetManifestSource(str(manifest))
+    found, absolute, missing = source.iter_files()
+
+    assert found.key == "scans/a.jpg"
+    assert source.read_bytes(found)[:3] == b"\xff\xd8\xff"
+    assert source.original_uri(found) == str(tmp_path / "scans" / "a.jpg")
+    assert source.read_bytes(absolute)[:3] == b"\xff\xd8\xff"
+    assert source.read_bytes(missing) is None
 
 
 def test_unreadable_manifest_explains_what_to_check(monkeypatch):

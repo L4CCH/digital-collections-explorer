@@ -21,6 +21,8 @@ IMAGE_EXTS = {
     "heif",
     "avif",
 }
+DOCUMENT_EXTS = {"pdf"}
+MODEL_EXTS = {"glb", "gltf"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini", ".picasa.ini"}
 JUNK_DIRS = {".git", "__pycache__", ".cache", "node_modules", ".thumbnails"}
 URL_COLUMN_GUESSES = ["image_url", "url", "path", "file", "uri"]
@@ -44,6 +46,7 @@ class FileRef:
     ext: str
     is_image: bool
     is_junk: bool = False
+    is_document: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -65,6 +68,7 @@ def classify(key: str, size: int, extra: dict | None = None) -> FileRef:
         ext=ext,
         is_image=ext in IMAGE_EXTS,
         is_junk=junk,
+        is_document=ext in DOCUMENT_EXTS,
         extra=extra or {},
     )
 
@@ -103,6 +107,10 @@ class Source:
 
     def original_uri(self, ref: FileRef) -> str:
         raise NotImplementedError
+
+    def local_address(self, value: str) -> str:
+        """Where a file the catalog names by path is on this machine"""
+        return value
 
     def catalog_rows(self) -> tuple[list[str], list[tuple]] | None:
         return None
@@ -219,6 +227,9 @@ class ParquetManifestSource(Source):
 
         self.path = path
         self.local_path = self._local_copy(path, anonymous, region)
+        self.base_dir = (
+            None if path.startswith("s3://") else os.path.dirname(os.path.abspath(path))
+        )
         self.con = duckdb.connect()
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
         self.columns = [
@@ -298,7 +309,25 @@ class ParquetManifestSource(Source):
                 return self.s3.get_object(**request)["Body"].read()
             except Exception:
                 return None
-        return self._read_http(ref.extra.get("url", ""), limit)
+        url = ref.extra.get("url", "")
+        if "://" not in url:
+            return self._read_local(url, limit)
+        return self._read_http(url, limit)
+
+    def _local_file(self, value: str) -> str | None:
+        if "://" in value or not self.base_dir:
+            return None
+        return os.path.join(self.base_dir, os.path.expanduser(value))
+
+    def _read_local(self, value: str, limit: int | None) -> bytes | None:
+        path = self._local_file(value)
+        if path is None:
+            return None
+        try:
+            with open(path, "rb") as fh:
+                return fh.read(limit) if limit else fh.read()
+        except OSError:
+            return None
 
     def _read_http(self, url: str, limit: int | None) -> bytes | None:
         import urllib.request
@@ -332,7 +361,11 @@ class ParquetManifestSource(Source):
     def original_uri(self, ref):
         if self.s3_bucket:
             return f"s3://{self.s3_bucket}/{ref.key}"
-        return ref.extra.get("url", ref.key)
+        url = ref.extra.get("url", ref.key)
+        return self._local_file(url) or url
+
+    def local_address(self, value):
+        return self._local_file(value) or value
 
     def catalog_rows(self):
         return self.columns, self._load()

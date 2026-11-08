@@ -70,9 +70,6 @@ jobs:
   frontend-lint:
     name: Frontend Linting
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        frontend: [photographs, maps, documents]
     
     steps:
     - uses: actions/checkout@v7
@@ -82,16 +79,26 @@ jobs:
       with:
         node-version: '22'
         cache: 'npm'
-        cache-dependency-path: src/frontend/${{ matrix.frontend }}/package-lock.json
+        cache-dependency-path: src/frontend/default/**/package-lock.json
     
     - name: Install dependencies
-      working-directory: src/frontend/${{ matrix.frontend }}
-      run: npm ci
+      working-directory: src/frontend/default
+      run: |
+        npm ci
+        for viewer in viewers/*/; do
+          if [ -f "$viewer/package-lock.json" ]; then npm ci --prefix "$viewer"; fi
+        done
     
     - name: Run ESLint
-      working-directory: src/frontend/${{ matrix.frontend }}
+      working-directory: src/frontend/default
       run: npm run lint
       continue-on-error: true
+
+    - name: Build with no viewers and with every viewer
+      working-directory: src/frontend/default
+      run: |
+        DCE_MEDIA= npm run build
+        DCE_MEDIA=3d,pdf,zoom npm run build
 
   dependency-review:
     name: Dependency Review

@@ -483,3 +483,56 @@ def test_text_search_keeps_the_models_own_match_score(site, monkeypatch):
     monkeypatch.setattr(search, "model_service", SaturatingModel())
     answer = site.get("/api/search/text?query=quilt").json()
     assert {r["score"] for r in answer["results"]} == {1.0}
+
+
+STELE_MODEL = "https://example.org/models/stele.glb"
+
+
+def add_models(embeddings_dir):
+    con = sqlite3.connect(embeddings_dir / "metadata.sqlite")
+    con.execute("ALTER TABLE records ADD COLUMN model_url TEXT")
+    con.execute("ALTER TABLE items ADD COLUMN view_orbit TEXT")
+    con.execute(
+        "UPDATE records SET model_url = ? WHERE record_id = 'rec-a'", (STELE_MODEL,)
+    )
+    con.execute("UPDATE items SET view_orbit = '45deg 75deg auto' WHERE id = 'a2'")
+    con.commit()
+    con.close()
+
+
+def test_a_grouped_index_can_name_a_records_model_and_its_views(tmp_path, monkeypatch):
+    from src.backend.services import collection_service, embedding_service
+
+    embeddings_dir = build_grouped_collection(tmp_path)
+    add_models(embeddings_dir)
+    monkeypatch.setattr(embedding_service.settings, "model_name", MODEL)
+    monkeypatch.setattr(collection_service.settings, "data_dir", str(tmp_path))
+    embeddings = EmbeddingService()
+    embeddings.embeddings_dir = embeddings_dir
+    embeddings.load_embeddings()
+    service = CollectionService(embeddings)
+
+    item = service.item("a1")
+
+    assert item["model"]["url"] == STELE_MODEL
+    assert item["model"]["views"] == [{"id": "a2", "orbit": "45deg 75deg auto"}]
+    assert item["image_count"] == 1
+    assert "model" not in service.item("b1")
+
+
+def test_similar_shapes_are_found_for_items_and_refused_for_unknown_ones(site, grouped):
+    from src.backend.services.shape_index import write_shape_index
+
+    assert site.get("/api/items/a1/similar-shape").json() == {"results": []}
+    write_shape_index(
+        grouped.embeddings.embeddings_dir,
+        ["rec-a", "rec-b", "rec-c"],
+        np.array([[1.0, 0.0], [0.0, 1.0], [0.8, 0.6]]),
+        "fake/shape",
+        8,
+    )
+    answer = site.get("/api/items/a2/similar-shape?groups=east").json()
+    assert [r["object_id"] for r in answer["results"]] == ["rec-c"]
+    answer = site.get("/api/items/a2/similar-shape").json()
+    assert [r["object_id"] for r in answer["results"]] == ["rec-c", "rec-b"]
+    assert site.get("/api/items/zz/similar-shape").status_code == 404

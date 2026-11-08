@@ -69,6 +69,26 @@ async def get_similar_items(
     return {"results": results}
 
 
+@router.get("/items/{item_id}/similar-shape")
+async def get_items_similar_in_shape(
+    item_id: str,
+    limit: int = Query(24, ge=1, le=MAX_SIMILAR, description="How many objects"),
+    groups: Optional[str] = Query(None, description=GROUPS_DESCRIPTION),
+    records: Optional[Set[str]] = Depends(records_in_query),
+):
+    """Other objects whose 3D models are most like this one's in form."""
+    results = await run_in_threadpool(
+        collection_service.similar_in_shape,
+        item_id,
+        limit,
+        checked_groups(groups),
+        records,
+    )
+    if results is None:
+        raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+    return {"results": results}
+
+
 @router.get("/categories/{category}")
 async def list_catalog_values(
     category: Literal["object_type", "place", "culture", "topic", "name", "date"],

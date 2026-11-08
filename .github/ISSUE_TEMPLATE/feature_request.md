@@ -35,13 +35,14 @@ Describe a specific scenario where this feature would be useful:
 2. They would...
 3. The result would be...
 
-## Collection Type
+## Kinds of Material
 
-Which collection type(s) would benefit from this feature?
-- [ ] All collection types
-- [ ] Photographs
-- [ ] Maps
-- [ ] Documents
+Which kinds of material would benefit from this feature?
+- [ ] All of them
+- [ ] Photos and other images
+- [ ] 3D models
+- [ ] PDFs
+- [ ] Maps and other large images in deep zoom
 
 ## Implementation Ideas (Optional)
 

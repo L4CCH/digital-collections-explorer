@@ -86,6 +86,65 @@ async def get_related_image(source_id: str):
     return FileResponse(path, headers=CACHE_HEADERS)
 
 
+@router.get("/models/{id}")
+async def get_model(id: str):
+    """
+    Serve the 3D model of the object an image belongs to
+
+    Args:
+        id: The ID of an image whose metadata names the model
+    """
+    doc = embedding_service.get_document_by_id(id)
+    address = ((doc or {}).get("metadata") or {}).get("model_url")
+
+    if not address:
+        raise HTTPException(status_code=404, detail=f"Item {id} has no 3D model")
+
+    if address.startswith(("http://", "https://")):
+        return RedirectResponse(address)
+
+    path = resolve_path(address)
+
+    if path.suffix.lower() != ".glb":
+        raise HTTPException(
+            status_code=404, detail="Only .glb models kept on this site can be served"
+        )
+
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Model not found at path: {path}")
+
+    return FileResponse(path, media_type="model/gltf-binary", headers=CACHE_HEADERS)
+
+
+@router.get("/documents/{id}")
+async def get_document(id: str):
+    """
+    Serve the PDF a page was drawn from, to read in the browser
+
+    Args:
+        id: The ID of a page of the PDF
+    """
+    doc = embedding_service.get_document_by_id(id)
+    address = ((doc or {}).get("metadata") or {}).get("document")
+
+    if not address:
+        raise HTTPException(status_code=404, detail=f"Item {id} is not a page of a PDF")
+
+    if address.startswith(("http://", "https://")):
+        return RedirectResponse(address)
+
+    path = resolve_path(address)
+
+    if path.suffix.lower() != ".pdf" or not path.exists():
+        raise HTTPException(status_code=404, detail=f"PDF not found at path: {path}")
+
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        headers={**CACHE_HEADERS, "Content-Disposition": "inline"},
+    )
+
+
 @router.get("/static/{id}")
 async def get_original_document(id: str):
     """

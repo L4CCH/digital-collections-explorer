@@ -1,0 +1,10 @@
+{
+  "name": "dce-viewer-zoom",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Zooms far into maps and other large images served by IIIF image servers",
+  "dependencies": {
+    "openseadragon": "^6.1.1"
+  }
+}

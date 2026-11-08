@@ -27,9 +27,8 @@ Fixes #(issue)
 <!-- Mark all that apply -->
 
 - [ ] Backend (Python/FastAPI)
-- [ ] Frontend - Photographs
-- [ ] Frontend - Maps
-- [ ] Frontend - Documents
+- [ ] Frontend
+- [ ] 3D, PDF or zoom viewer
 - [ ] CLIP/ML models
 - [ ] Configuration
 - [ ] Documentation
@@ -55,7 +54,7 @@ Fixes #(issue)
 
 ### Test Configuration
 
-- **Collection type tested**: [photographs/maps/documents/all]
+- **Kinds of material tested**: [photos only/3d/pdf/zoom]
 - **Python version**: [e.g., 3.10]
 - **Node version**: [e.g., 18]
 - **OS**: [e.g., macOS, Ubuntu]

@@ -110,7 +110,7 @@ Template for adding sponsorship/funding information
 Suggested label set including:
 - Standard labels (bug, enhancement, documentation)
 - Research-specific (research, ml-model)
-- Collection-specific (photographs, maps, documents)
+- Kinds of material (3d, pdf, zoom)
 - Technical labels (frontend, backend, python, javascript)
 
 **Action Required**: Import these labels to your GitHub repository (see below).

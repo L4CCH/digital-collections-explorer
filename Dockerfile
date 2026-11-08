@@ -4,11 +4,11 @@ FROM node:22-slim AS node-builder
 WORKDIR /app
 COPY . /app
 
-ARG COLLECTION_TYPE=photographs
+ARG MEDIA=""
 RUN npm install --omit=dev && \
-    npm run setup -- --type=$COLLECTION_TYPE && \
+    npm run setup -- --with=$MEDIA && \
     mkdir -p /build/dist && \
-    cp -r src/frontend/$COLLECTION_TYPE/dist/* /build/dist/
+    cp -r src/frontend/default/dist/* /build/dist/
 
 # === Stage 2: Python runtime ===
 FROM python:3.12-slim
@@ -19,8 +19,11 @@ ARG TORCH_VARIANT=cpu
 RUN pip install --no-cache-dir torch torchvision \
     --index-url https://download.pytorch.org/whl/${TORCH_VARIANT}
 
-COPY requirements.txt .
+COPY requirements.txt requirements-pdf.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+ARG MEDIA=""
+RUN case ",$MEDIA," in *,pdf,*) pip install --no-cache-dir -r requirements-pdf.txt ;; esac
 
 # 1000 is the user id Hugging Face Spaces runs containers as.
 RUN useradd --create-home --uid 1000 dce && \
@@ -39,8 +42,7 @@ RUN if [ "$PRELOAD_MODEL" = "true" ]; then \
 
 COPY . /app
 
-ARG COLLECTION_TYPE=photographs
-COPY --from=node-builder /build/dist /app/src/frontend/$COLLECTION_TYPE/dist
+COPY --from=node-builder /build/dist /app/src/frontend/default/dist
 COPY --from=node-builder /app/config.json /app/config.json
 
 USER dce

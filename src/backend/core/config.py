@@ -30,6 +30,19 @@ def model_type_of(model_name: str | None) -> str:
     return DEFAULT_MODEL_TYPE
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FRONTENDS_DIR = REPO_ROOT / "src" / "frontend"
+DEFAULT_FRONTEND = "default"
+LEGACY_COLLECTION_TYPES = {"photographs": [], "maps": ["zoom"], "documents": ["pdf"]}
+
+
+def built_frontend(frontend: str) -> Path:
+    """Where a frontend is built: a folder in src/frontend, or the path to one"""
+    is_path = os.path.isabs(frontend) or frontend.startswith(".") or "/" in frontend
+    folder = (REPO_ROOT / frontend) if is_path else (FRONTENDS_DIR / frontend)
+    return folder.expanduser() / "dist"
+
+
 DEFAULT_MODEL_NAMES = {
     "clip": "openai/clip-vit-base-patch32",
     "siglip": "google/siglip-base-patch16-224",
@@ -59,10 +72,10 @@ class Settings(BaseSettings):
     # Deprecated: use model_name instead
     clip_model: str = "openai/clip-vit-base-patch32"
 
+    frontend: str = DEFAULT_FRONTEND
+    media: list[str] = []
+
     # Data directories
-    collection_type: str = (
-        "photographs"  # this is the default collection type, will be overwritten by config.json
-    )
     raw_data_dir: str = "data/raw"
     processed_data_dir: str = "data/processed"
     embeddings_dir: str = "data/embeddings"
@@ -123,10 +136,12 @@ def load_config(config_path: Path | None = None):
         # Backward compatibility: keep clip_model in sync
         settings_dict["clip_model"] = settings_dict["model_name"]
 
-        # Data directories
-        settings_dict["collection_type"] = config_data.get(
-            "collection_type", "photographs"
+        settings_dict["frontend"] = config_data.get("frontend") or DEFAULT_FRONTEND
+        settings_dict["media"] = config_data.get(
+            "media", LEGACY_COLLECTION_TYPES.get(config_data.get("collection_type"), [])
         )
+
+        # Data directories
         settings_dict["raw_data_dir"] = config_data.get("raw_data_dir", "data/raw")
         settings_dict["processed_data_dir"] = config_data.get(
             "processed_data_dir", "data/processed"

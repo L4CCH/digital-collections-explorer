@@ -14,9 +14,11 @@ updates:
       - "dependencies"
       - "python"
 
-  # Frontend - Photographs
+  # Frontend and its optional viewers
   - package-ecosystem: "npm"
-    directory: "/src/frontend/photographs"
+    directories:
+      - "/src/frontend/default"
+      - "/src/frontend/default/viewers/*"
     schedule:
       interval: "monthly"
     groups:
@@ -28,48 +30,6 @@ updates:
     labels:
       - "dependencies"
       - "frontend"
-      - "photographs"
-
-  # Frontend - Maps
-  - package-ecosystem: "npm"
-    directory: "/src/frontend/maps"
-    schedule:
-      interval: "monthly"
-    groups:
-      build:
-        patterns: ["vite", "@vitejs/*"]
-      lint:
-        patterns: ["eslint", "@eslint/*", "eslint-plugin-*", "globals"]
-    ignore:
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react-dom"
-        update-types: ["version-update:semver-major"]
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "frontend"
-      - "maps"
-
-  # Frontend - Documents
-  - package-ecosystem: "npm"
-    directory: "/src/frontend/documents"
-    schedule:
-      interval: "monthly"
-    groups:
-      build:
-        patterns: ["vite", "@vitejs/*"]
-      lint:
-        patterns: ["eslint", "@eslint/*", "eslint-plugin-*", "globals"]
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "frontend"
-      - "documents"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
