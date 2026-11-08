@@ -223,7 +223,6 @@ function App() {
                 counted(collection.objects, 'object'),
                 (collection.images > 0 || !(collection.models || collection.documents)) && counted(collection.images, 'image'),
                 collection.documents > 0 && counted(collection.documents, 'PDF'),
-                collection.models > 0 && counted(collection.models, '3D model'),
                 collection.source_name && `from ${collection.source_name}`,
               ].filter(Boolean).join(' · ')}
             </p>
