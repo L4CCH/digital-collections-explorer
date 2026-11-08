@@ -144,6 +144,15 @@ def summary(state: IngestState, embeddings_dir: Path, data_dir: str | None) -> d
     }
 
 
+def readable_files(refs: list) -> tuple[list, str | None]:
+    """The files this install can read, and how many PDFs it has to leave out"""
+    documents = sum(1 for ref in refs if ref.is_document)
+    if not documents or can_read_pdfs():
+        return refs, None
+    unread = f"{documents:,} PDF{'' if documents == 1 else 's'}"
+    return [ref for ref in refs if not ref.is_document], unread
+
+
 def foreign_index_exists(embeddings_dir: Path) -> bool:
     return (embeddings_dir / "embeddings.pt").exists() and not (
         embeddings_dir / STATE_FILE
@@ -212,14 +221,15 @@ def main() -> int:
         print("No images found.")
         state.close()
         return 2
-    documents = sum(1 for ref in refs if ref.is_document)
-    if documents and not can_read_pdfs():
-        print(
-            f"Found {documents:,} PDFs. Reading them needs one more package:\n"
-            f"  {INSTALL_HINT}"
-        )
+    refs, unread = readable_files(refs)
+    if unread and not refs:
+        print(f"Found {unread}. Reading them needs one more package:\n  {INSTALL_HINT}")
         state.close()
         return 2
+    if unread:
+        print(f"Leaving out {unread}. Reading them needs one more package:")
+        print(f"  {INSTALL_HINT}")
+    documents = sum(1 for ref in refs if ref.is_document)
 
     ids = [make_item_id(ref.key) for ref in refs]
     state.seed([(item_id, ref.key, ref.size) for item_id, ref in zip(ids, refs)])

@@ -124,11 +124,22 @@ def test_a_pdf_with_a_page_that_fails_is_tried_again_later(
     assert not state.finished_ids([document], retry_failed=True)
 
 
-def test_ingest_asks_for_the_pdf_reader_before_starting(
+def test_without_the_pdf_reader_the_images_are_still_indexed(folder, monkeypatch):
+    from src.ingest import __main__ as command
+
+    monkeypatch.setattr(command, "can_read_pdfs", lambda: False)
+    refs = list(LocalDirSource(str(folder)).iter_files())
+    readable, unread = command.readable_files(refs)
+    assert [ref.key for ref in readable] == ["photo.jpg"]
+    assert unread == "2 PDFs"
+
+
+def test_ingest_asks_for_the_pdf_reader_when_it_finds_only_pdfs(
     folder, tmp_path, monkeypatch, capsys
 ):
     from src.ingest import __main__ as command
 
+    (folder / "photo.jpg").unlink()
     monkeypatch.setattr(command, "can_read_pdfs", lambda: False)
     monkeypatch.setattr(
         sys, "argv", ["ingest", str(folder), "--data-dir", str(tmp_path / "out")]
