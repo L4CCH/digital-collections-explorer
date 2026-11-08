@@ -2,6 +2,8 @@
 
 import json
 import logging
+import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -48,50 +50,60 @@ def read_shape_info(embeddings_dir: Path) -> Optional[dict]:
     return json.loads(path.read_text()) if path.exists() else None
 
 
+@dataclass(frozen=True)
+class Shapes:
+    stamp: Tuple[str, int]
+    vectors: torch.Tensor
+    objects: List[str]
+    row: Dict[str, int]
+
+
 class ShapeIndex:
     """The shape index of the collection being served, read again when it changes"""
 
     def __init__(self):
-        self.stamp: Optional[Tuple[str, int]] = None
-        self.vectors: Optional[torch.Tensor] = None
-        self.objects: List[str] = []
-        self.row: Dict[str, int] = {}
+        self.lock = threading.Lock()
+        self.shapes: Optional[Shapes] = None
 
-    def _forget(self) -> None:
-        self.stamp, self.vectors, self.objects, self.row = None, None, [], {}
-
-    def load(self, embeddings_dir: Path) -> bool:
+    def load(self, embeddings_dir: Path) -> Optional[Shapes]:
         """Read the index from disk unless the copy in memory is current"""
         folder = Path(embeddings_dir) / SHAPE_DIR
         path = folder / VECTORS_FILE
-        if not path.exists() or not (folder / OBJECTS_FILE).exists():
-            self._forget()
-            return False
-        stamp = (str(path), path.stat().st_mtime_ns)
-        if stamp == self.stamp:
-            return True
-        vectors = np.load(path)
-        objects = [str(o) for o in json.loads((folder / OBJECTS_FILE).read_text())]
-        if len(objects) != vectors.shape[0]:
-            logger.warning(
-                f"{path} has {vectors.shape[0]} rows but {len(objects)} objects"
+        with self.lock:
+            if not path.exists() or not (folder / OBJECTS_FILE).exists():
+                self.shapes = None
+                return None
+            stamp = (str(path), path.stat().st_mtime_ns)
+            if self.shapes is not None and self.shapes.stamp == stamp:
+                return self.shapes
+            vectors = np.load(path)
+            objects = [str(o) for o in json.loads((folder / OBJECTS_FILE).read_text())]
+            if len(objects) != vectors.shape[0]:
+                logger.warning(
+                    f"{path} has {vectors.shape[0]} rows but {len(objects)} objects"
+                )
+                self.shapes = None
+                return None
+            self.shapes = Shapes(
+                stamp=stamp,
+                vectors=torch.from_numpy(
+                    np.ascontiguousarray(vectors, dtype=np.float32)
+                ),
+                objects=objects,
+                row={o: n for n, o in enumerate(objects)},
             )
-            self._forget()
-            return False
-        self.stamp, self.objects = stamp, objects
-        self.vectors = torch.from_numpy(np.ascontiguousarray(vectors, dtype=np.float32))
-        self.row = {o: n for n, o in enumerate(objects)}
-        return True
+            return self.shapes
 
     def neighbors(
         self, embeddings_dir: Path, object_id: str
     ) -> Optional[List[Tuple[str, float]]]:
         """Every other object with a model, the most alike in shape first"""
-        if not self.load(embeddings_dir) or object_id not in self.row:
+        shapes = self.load(embeddings_dir)
+        if shapes is None or object_id not in shapes.row:
             return None
-        scores = (self.vectors @ self.vectors[self.row[object_id]]).numpy()
+        scores = (shapes.vectors @ shapes.vectors[shapes.row[object_id]]).numpy()
         return [
-            (self.objects[n], float(scores[n]))
+            (shapes.objects[n], float(scores[n]))
             for n in np.argsort(-scores, kind="stable").tolist()
-            if self.objects[n] != object_id
+            if shapes.objects[n] != object_id
         ]
