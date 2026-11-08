@@ -47,7 +47,7 @@ The site's interface lives in `src/frontend/default`. Another frontend can take 
 
 With an AI coding agent such as Claude Code, Codex, Gemini CLI or Cursor, ask it to make your collection searchable. The `dce-setup` skill in `skills/` walks it through profiling, indexing and serving.
 
-With Docker, one command builds the index and another serves it. The image is built for x86-64, so on Apple Silicon Docker runs it under emulation.
+With Docker, one command builds the index and another serves it. The image is built for x86-64, so on Apple Silicon Docker runs it under emulation. The published image shows every kind of material; an image of your own built with `docker build --build-arg MEDIA=pdf .` holds only what you list.
 
 ```bash
 docker run --rm -v "$PWD/my-collection:/data" -v /path/to/images:/source:ro ghcr.io/l4cch/digital-collections-explorer ingest /source
