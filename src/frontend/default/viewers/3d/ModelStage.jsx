@@ -43,6 +43,7 @@ function ModelStage({ src, orbit, poster, alt }) {
     <div className="model-stage">
       {isReady ? (
         <model-viewer
+          key={src}
           ref={element}
           class="model-stage-viewer"
           src={src}
