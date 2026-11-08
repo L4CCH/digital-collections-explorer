@@ -1,12 +1,18 @@
 .model-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.model-stage-viewer {
   display: block;
   width: 100%;
   height: 100%;
   --poster-color: transparent;
-  --progress-bar-color: #d0b49f;
+  --progress-bar-height: 0px;
 }
 
-.model-stage:focus-visible {
+.model-stage-viewer:focus-visible {
   outline: 2px solid #d0b49f;
   outline-offset: -2px;
 }
@@ -16,4 +22,77 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.model-stage-status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: -26px 0 0 -26px;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.model-stage-status.is-done {
+  opacity: 0;
+}
+
+.model-stage-badge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  color: #f8f5f0;
+  background-color: rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  /* Waits a moment, so a model that is already cached never flashes the spinner. */
+  animation: model-stage-appear 0.2s ease 0.15s both;
+}
+
+.model-stage-badge::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 2px solid transparent;
+  border-top-color: #d0b49f;
+  border-radius: 50%;
+  animation: model-stage-spin 0.9s linear infinite;
+}
+
+.model-stage-badge svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.has-failed .model-stage-badge {
+  color: #b0b0b0;
+}
+
+.has-failed .model-stage-badge::before {
+  display: none;
+}
+
+@keyframes model-stage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes model-stage-appear {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-stage-badge::before {
+    animation-duration: 2.4s;
+  }
 }

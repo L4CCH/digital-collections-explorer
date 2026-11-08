@@ -16,6 +16,7 @@ import { viewer } from '../services/viewers';
 import './ItemDetail.css';
 
 const ModelStage = viewer('3d')?.Stage;
+const prepareModels = viewer('3d')?.prepare;
 const DeepZoom = viewer('zoom')?.Zoom;
 
 const SIMILAR_COUNT = 24;
@@ -134,6 +135,12 @@ function ItemDetail({ id, collection, canGoBack }) {
       isCurrent = false;
     };
   }, [currentId]);
+
+  useEffect(() => {
+    if (model) {
+      prepareModels();
+    }
+  }, [model]);
 
   useEffect(() => {
     let isCurrent = true;
