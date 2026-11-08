@@ -24,7 +24,7 @@ const MEDIA = {
 
 const LEGACY_TYPES = { photographs: [], maps: ['zoom'], documents: ['pdf'] };
 
-const readConfig = () => JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+const readConfig = () => (fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) : {});
 
 const writeConfig = (config) => fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
 

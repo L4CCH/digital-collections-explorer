@@ -167,21 +167,10 @@ export const getSimilar = async (id, limit = 24) => {
   return results;
 };
 
-/**
- * Where the 3D model of an object kept on this site is served from
- * @param {string} id - The ID of an image whose metadata names the model
- * @returns {string}
- */
 export const modelUrl = (id) => `${API_URL}/models/${encodeURIComponent(id)}`;
 
 export const documentUrl = (id, page) => `${API_URL}/documents/${encodeURIComponent(id)}#page=${page}`;
 
-/**
- * Get other objects whose 3D models are most like this one's in form
- * @param {string} id - The item ID
- * @param {number} limit - How many objects
- * @returns {Promise<Array>}
- */
 export const getSimilarShape = async (id, limit = 24) => {
   const { results } = await getJson(`/api/items/${encodeURIComponent(id)}/similar-shape?limit=${limit}`);
   return results;
