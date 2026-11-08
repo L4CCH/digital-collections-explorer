@@ -5,7 +5,8 @@ set -euo pipefail
 {
 
 # Seconds to wait for the machine to copy the collection, download the image and restart.
-COMMAND_TIMEOUT=3600
+# A collection of 707,000 files took almost two hours on a t3.large.
+COMMAND_TIMEOUT=21600
 
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-west-2}}"
 FROM=""
