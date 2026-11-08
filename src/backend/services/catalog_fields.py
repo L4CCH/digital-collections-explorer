@@ -1,5 +1,6 @@
 """Pick out the catalog fields the site relies on, whatever the collection calls them."""
 
+import re
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -12,6 +13,14 @@ MODEL_URL_KEYS = ("model_url", "model", "glb", "gltf", "3d_model")
 MODEL_EXTENSIONS = (".glb", ".gltf")
 
 VIEW_ORBIT_KEY = "view_orbit"
+
+IIIF_KEYS = ("iiif", "iiif_url", "iiif_image", "iiif_service", "iiif_info")
+
+IIIF_IMAGE_REQUEST = re.compile(
+    r"/(full|square|pct:[^/]+|\d+,\d+,\d+,\d+)/[^/]+/!?\d+(\.\d+)?"
+    r"/(default|color|colour|gray|grey|bitonal|native)\.\w+$",
+    re.IGNORECASE,
+)
 
 
 def object_id_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -45,3 +54,16 @@ def view_orbit_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
     """Return where the camera stood for an image rendered from a 3D model"""
     value = str((catalog or {}).get(VIEW_ORBIT_KEY) or "").strip()
     return value or None
+
+
+def iiif_info_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Return the info.json of the IIIF image service that serves this image, if any"""
+    for key in IIIF_KEYS:
+        value = str((catalog or {}).get(key) or "").strip()
+        if not value.startswith(("http://", "https://")):
+            continue
+        if urlparse(value).path.endswith("/info.json"):
+            return value
+        service = IIIF_IMAGE_REQUEST.sub("", value.split("?", 1)[0].rstrip("/"))
+        return f"{service}/info.json"
+    return None

@@ -70,6 +70,10 @@ def llms_txt(collection: Dict[str, Any], base_path: str = "") -> str:
         counts.append(f"{collection['objects']:,} objects")
     if counts:
         lines += [f"This site holds {' in '.join(counts)}.", ""]
+    if collection.get("documents"):
+        count = collection["documents"]
+        noun = "PDF" if count == 1 else "PDFs"
+        lines += [f"It also holds {count:,} {noun}, searched page by page.", ""]
     if collection.get("models"):
         lines += [f"{collection['models']:,} of the objects have 3D models.", ""]
     if collection.get("source_name"):

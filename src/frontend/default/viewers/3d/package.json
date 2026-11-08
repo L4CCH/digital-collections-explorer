@@ -1,0 +1,11 @@
+{
+  "name": "dce-viewer-3d",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Turns and zooms the 3D model (.glb) of an object on its page",
+  "dependencies": {
+    "@google/model-viewer": "^4.4.0",
+    "three": "^0.183.2"
+  }
+}

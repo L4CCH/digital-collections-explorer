@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import platform
@@ -7,11 +8,13 @@ import shutil
 import sys
 from pathlib import Path
 
-from src.backend.core.config import settings
+from src.backend.core.config import built_frontend, settings
 
 AWS_CREDENTIAL_FILES = ("~/.aws/credentials", "~/.aws/config")
 AWS_CREDENTIAL_VARIABLES = ("AWS_ACCESS_KEY_ID", "AWS_PROFILE")
 INGEST_STATE_FILE = "ingest_state.sqlite"
+FRONTEND_MANIFEST = "frontend.json"
+PYTHON_PACKAGES = {"3d": "playwright", "pdf": "pypdfium2"}
 
 
 def detect_device() -> str:
@@ -48,10 +51,24 @@ def index_state(embeddings_dir: Path) -> str:
     return "created_by_something_else"
 
 
+def media_shown_by(dist: Path) -> list[str] | None:
+    try:
+        return json.loads((dist / FRONTEND_MANIFEST).read_text())["media"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def python_packages() -> dict[str, bool]:
+    return {
+        medium: importlib.util.find_spec(package) is not None
+        for medium, package in PYTHON_PACKAGES.items()
+    }
+
+
 def describe() -> dict:
     embeddings_dir = Path(settings.embeddings_dir)
     disk_root = embeddings_dir if embeddings_dir.exists() else Path(".")
-    frontend = Path(f"src/frontend/{settings.collection_type}/dist")
+    frontend = built_frontend(settings.frontend)
     return {
         "system": f"{platform.system()} {platform.machine()}",
         "python": platform.python_version(),
@@ -60,10 +77,13 @@ def describe() -> dict:
         "free_disk_bytes": shutil.disk_usage(disk_root).free,
         "aws_credentials_found": has_aws_credentials(),
         "model": {"type": settings.model_type.value, "name": settings.model_name},
-        "collection_type": settings.collection_type,
+        "frontend": settings.frontend,
+        "media": settings.media,
         "embeddings_dir": str(embeddings_dir),
         "existing_index": index_state(embeddings_dir),
-        "frontend_built": frontend.exists(),
+        "frontend_built": (frontend / "index.html").exists(),
+        "frontend_media": media_shown_by(frontend),
+        "python_packages": python_packages(),
         "port": settings.port,
     }
 

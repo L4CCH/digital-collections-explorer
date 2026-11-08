@@ -85,19 +85,19 @@
     "description": "Machine learning model related"
   },
   {
-    "name": "photographs",
+    "name": "3d",
     "color": "c5def5",
-    "description": "Photographs collection specific"
+    "description": "3D models"
   },
   {
-    "name": "maps",
-    "color": "bfd4f2",
-    "description": "Maps collection specific"
-  },
-  {
-    "name": "documents",
+    "name": "pdf",
     "color": "d4c5f9",
-    "description": "Documents collection specific"
+    "description": "PDF documents"
+  },
+  {
+    "name": "zoom",
+    "color": "bfd4f2",
+    "description": "Deep zoom of maps and other large images from IIIF servers"
   },
   {
     "name": "breaking change",

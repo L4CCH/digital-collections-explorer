@@ -33,6 +33,11 @@ COMMIT_INTERVAL_SECONDS = 5
 
 FLOAT32_BYTES = 4
 
+NOT_A_SPLIT_DOCUMENT = (
+    "NOT (json_extract(metadata, '$.type') IS 'pdf' "
+    "AND json_extract(metadata, '$.pages') > 0)"
+)
+
 # SQLite allows at most 999 bound parameters per statement by default.
 SQL_PARAMETER_CHUNK = 900
 
@@ -45,6 +50,7 @@ class Result:
     elapsed_ms: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
     embedding: bytes | None = None
+    page_key: str | None = None
 
 
 class IngestState:
@@ -95,6 +101,11 @@ class IngestState:
         return finished
 
     def record(self, result: Result) -> None:
+        if result.page_key is not None:
+            self.con.execute(
+                "INSERT OR IGNORE INTO items (id, key) VALUES (?, ?)",
+                (result.item_id, result.page_key),
+            )
         self.con.execute(
             "UPDATE items SET status=?, error=?, elapsed_ms=?, metadata=?, embedding=?, "
             "updated_at=datetime('now') WHERE id=?",
@@ -119,7 +130,10 @@ class IngestState:
 
     def counts(self) -> dict[str, int]:
         return dict(
-            self.con.execute("SELECT status, count(*) FROM items GROUP BY status")
+            self.con.execute(
+                "SELECT status, count(*) FROM items "
+                f"WHERE {NOT_A_SPLIT_DOCUMENT} GROUP BY status"
+            )
         )
 
     def problems(self, limit: int = 10) -> list[tuple[str, str, int]]:

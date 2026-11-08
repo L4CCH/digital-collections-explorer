@@ -45,8 +45,14 @@ def test_name_template_keeps_hashes_whole():
 
 def test_counts_images_and_other_files(profile):
     assert profile.scan.image_files == 13
-    assert profile.scan.non_image_files == 2
+    assert profile.scan.document_files == 1
+    assert profile.scan.non_image_files == 1
     assert any(issue.kind == "corrupt" for issue in profile.scan.issues)
+
+
+def test_a_folder_with_pdfs_asks_for_the_pdf_option(profile):
+    assert profile.media == ["pdf"]
+    assert not any(".pdf" in issue.note for issue in profile.scan.issues)
 
 
 def test_exif_dates_become_a_file_derived_filter(profile):

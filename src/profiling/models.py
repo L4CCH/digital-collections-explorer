@@ -73,6 +73,9 @@ class CatalogCandidate(BaseModel):
 class ScanStats(BaseModel):
     total_files: int = 0
     image_files: int = 0
+    document_files: int = 0
+    document_bytes: int = 0
+    model_files: int = 0
     non_image_files: int = 0
     unreadable_files: int = 0
     total_bytes: int = 0
@@ -136,6 +139,7 @@ class CollectionProfile(BaseModel):
     capabilities: Capabilities = Field(default_factory=Capabilities)
     sizing: Sizing = Field(default_factory=Sizing)
     decisions: list[Decision] = Field(default_factory=list)
+    media: list[str] = Field(default_factory=list)
 
     def field(self, name: str) -> FieldProfile | None:
         return next((f for f in self.fields if f.name == name), None)

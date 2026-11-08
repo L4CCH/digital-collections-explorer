@@ -55,7 +55,7 @@ Fixes #(issue)
 
 ### Test Configuration
 
-- **Collection type tested**: [photographs/maps/documents/all]
+- **Kinds of material tested**: [photos only/3d/pdf/zoom]
 - **Python version**: [e.g., 3.10]
 - **Node version**: [e.g., 18]
 - **OS**: [e.g., macOS, Ubuntu]

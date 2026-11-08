@@ -13,6 +13,7 @@ from src.backend.services.embedding_service_factory import create_embedding_serv
 from src.backend.services.index_info import KNOWN_DIMENSIONS
 from src.profiling.sources import open_source
 
+from .documents import INSTALL_HINT, can_read_pdfs
 from .export import export_for_backend
 from .pipeline import Options, clock, make_item_id, run
 from .report import cloud_machine_type, render_report, run_report
@@ -195,10 +196,14 @@ def main() -> int:
         return 2
     state.remember("model_name", settings.model_name)
 
-    print(f"Listing images in {args.uri} ...")
+    print(f"Listing images and PDFs in {args.uri} ...")
     source = open_source(args.uri, anonymous=args.anonymous, fetch_via=args.fetch_via)
     refs = sorted(
-        (ref for ref in source.iter_files() if ref.is_image and not ref.is_junk),
+        (
+            ref
+            for ref in source.iter_files()
+            if (ref.is_image or ref.is_document) and not ref.is_junk
+        ),
         key=lambda ref: ref.key,
     )
     if args.limit:
@@ -207,15 +212,23 @@ def main() -> int:
         print("No images found.")
         state.close()
         return 2
+    documents = sum(1 for ref in refs if ref.is_document)
+    if documents and not can_read_pdfs():
+        print(
+            f"Found {documents:,} PDFs. Reading them needs one more package:\n"
+            f"  {INSTALL_HINT}"
+        )
+        state.close()
+        return 2
 
     ids = [make_item_id(ref.key) for ref in refs]
     state.seed([(item_id, ref.key, ref.size) for item_id, ref in zip(ids, refs)])
     finished = state.finished_ids(ids, args.retry_failed)
     pending = [ref for item_id, ref in zip(ids, refs) if item_id not in finished]
-    print(
-        f"Found {len(refs):,} images. {len(finished):,} already indexed, "
-        f"{len(pending):,} to go."
+    found = f"{len(refs) - documents:,} images" + (
+        f" and {documents:,} PDF{'' if documents == 1 else 's'}" if documents else ""
     )
+    print(f"Found {found}. {len(finished):,} already indexed, {len(pending):,} to go.")
 
     if pending:
         settings.device = DeviceType(

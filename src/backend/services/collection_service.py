@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import torch
 
 from ..core.config import settings
-from .catalog_fields import object_id_from, source_url_from
+from .catalog_fields import iiif_info_from, object_id_from, source_url_from
 from .catalog_filter import can_filter
 from .collection_store import METADATA_DB, has_table, read_record_details
 from .embedding_service import EmbeddingService, embedding_service
@@ -51,6 +51,8 @@ class CollectionService:
         self.row_object: Optional[torch.Tensor] = None
         self.object_model: Dict[str, int] = {}
         self.view_rows: Set[int] = set()
+        self.page_rows: Set[int] = set()
+        self.documents: Set[str] = set()
         self.photo_count: Dict[str, int] = {}
         self.shapes = ShapeIndex()
 
@@ -62,13 +64,14 @@ class CollectionService:
             return
         self.position, self.object_ids, self.members = {}, [], {}
         self.object_model, self.view_rows = {}, set()
+        self.page_rows, self.documents = set(), set()
         cataloged: List[bool] = []
         for index, item_id in enumerate(item_ids):
             metadata = (self.embeddings.metadata or {}).get(item_id, {})
             record = metadata.get("object_id") or object_id_from(
                 metadata.get("catalog")
             )
-            object_id = record or item_id
+            object_id = record or metadata.get("document_key") or item_id
             self.position[item_id] = index
             self.object_ids.append(object_id)
             self.members.setdefault(object_id, []).append(index)
@@ -77,6 +80,9 @@ class CollectionService:
                 self.object_model.setdefault(object_id, index)
             if metadata.get("view_orbit"):
                 self.view_rows.add(index)
+            if metadata.get("type") == "pdf_page":
+                self.page_rows.add(index)
+                self.documents.add(metadata.get("document_key") or object_id)
         self.photo_count = {
             o: sum(1 for m in members if m not in self.view_rows)
             for o, members in self.members.items()
@@ -253,6 +259,8 @@ class CollectionService:
         catalog = metadata.get("catalog")
         metadata.setdefault("title", (catalog or {}).get("title"))
         metadata.setdefault("source_url", source_url_from(catalog))
+        if "iiif" not in metadata and iiif_info_from(catalog):
+            metadata["iiif"] = iiif_info_from(catalog)
         object_id = self.object_ids[index]
         if object_id in self.object_model:
             metadata.setdefault(
@@ -306,7 +314,10 @@ class CollectionService:
                 described.update(json.loads(path.read_text()))
             except (OSError, ValueError, TypeError) as e:
                 logger.warning(f"Ignoring unreadable {path}: {e}")
-        described["images"] = self.indexed_count - len(self.view_rows)
+        described["images"] = (
+            self.indexed_count - len(self.view_rows) - len(self.page_rows)
+        )
+        described["documents"] = len(self.documents)
         described["models"] = len(self.object_model)
         described["objects"] = len(self.members)
         described["uncataloged_images"] = int((~self.cataloged_rows).sum())

@@ -49,6 +49,21 @@ def overview_lines(p: CollectionProfile) -> list[str]:
     lines.append(
         "  Formats: " + ", ".join(f"{ext} {count:,}" for ext, count in formats)
     )
+    if scan.document_files:
+        noun = "PDF" if scan.document_files == 1 else "PDFs"
+        size = f", {human_bytes(scan.document_bytes)}" if scan.document_bytes else ""
+        lines.append(
+            f"  Also {scan.document_files:,} {noun}{size}, indexed page by page"
+        )
+    if scan.model_files:
+        noun = "3D model" if scan.model_files == 1 else "3D models"
+        lines.append(
+            f"  Also {scan.model_files:,} {noun}, searched through views drawn from them"
+        )
+    if p.media:
+        lines.append(
+            f"  Build the site with: npm run setup -- --with={','.join(p.media)}"
+        )
     return lines
 
 

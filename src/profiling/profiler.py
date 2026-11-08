@@ -23,7 +23,7 @@ from .models import (
     Sizing,
     Structure,
 )
-from .sources import FileRef, Source
+from .sources import IIIF_COLUMNS, MODEL_COLUMNS, MODEL_EXTS, FileRef, Source
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Largest image seen in the Smithsonian NMAH collection was 123 megapixels.
@@ -217,6 +217,11 @@ def scan(
         elif ref.is_junk:
             stats.non_image_files += 1
             junk[ref.basename.lower()] += 1
+        elif ref.is_document:
+            stats.document_files += 1
+            stats.document_bytes += ref.size
+        elif ref.ext in MODEL_EXTS:
+            stats.model_files += 1
         elif ref.is_image:
             stats.image_files += 1
             stats.total_bytes += ref.size
@@ -719,6 +724,16 @@ def build_decisions(stats: ScanStats, structure: Structure) -> list[Decision]:
     return decisions
 
 
+def media_needed(stats: ScanStats, fields: list[FieldProfile]) -> list[str]:
+    columns = {field.name.lower() for field in fields}
+    needed = {
+        "3d": bool(stats.model_files or columns & set(MODEL_COLUMNS)),
+        "pdf": bool(stats.document_files),
+        "zoom": bool(columns & set(IIIF_COLUMNS)),
+    }
+    return [medium for medium, is_needed in needed.items() if is_needed]
+
+
 def profile_collection(
     source: Source,
     collection_id: str,
@@ -741,4 +756,5 @@ def profile_collection(
         capabilities=build_capabilities(fields),
         sizing=estimate_sizing(stats, deep["bandwidth_bps"], model_type),
         decisions=build_decisions(stats, structure),
+        media=media_needed(stats, fields),
     )

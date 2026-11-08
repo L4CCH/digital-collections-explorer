@@ -7,7 +7,6 @@
     "frontend-build": "node src/frontend/build.js"
   },
   "dependencies": {
-    "chalk": "^4.1.2",
-    "three": "^0.183.2"
+    "chalk": "^4.1.2"
   }
 }

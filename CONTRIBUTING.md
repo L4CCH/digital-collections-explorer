@@ -88,25 +88,26 @@ We welcome code contributions including:
 3. **Configure the project**
    ```bash
    npm install
-   npm run setup -- --type=photographs  # or maps, documents
+   npm run setup -- --with=3d,pdf,zoom
+   pip install -r requirements-3d.txt -r requirements-pdf.txt
    ```
 
-4. **Generate test embeddings** (optional, for testing)
+4. **Index some test images** (optional, for testing)
    ```bash
-   # Add some test images to data/raw
-   python -m src.models.generate_embeddings
+   # Add some test images and PDFs to data/raw
+   python -m src.ingest data/raw --data-dir data/collections/dev
    ```
 
 5. **Start the backend server**
    ```bash
-   python -m src.backend.main
+   DCE_DATA_DIR=data/collections/dev python -m src.backend.main
    ```
 
 ### Frontend Setup
 
 1. **Navigate to the frontend directory**
    ```bash
-   cd src/frontend/photographs  # or maps, documents
+   cd src/frontend/default
    ```
 
 2. **Install dependencies**
@@ -120,6 +121,20 @@ We welcome code contributions including:
    ```
 
 The frontend will be available at http://localhost:5173 and will proxy API requests to http://localhost:8000.
+
+Each optional viewer is a package of its own in `src/frontend/default/viewers/`, with its own `package.json`. Setup installs a viewer only when `media` in `config.json` lists it, and the build leaves out the others. A new viewer exports its components from `index.js`, may add to the Vite configuration in `vite.js`, and is reached through `viewer('<name>')` in `src/services/viewers.js`.
+
+### Making a frontend
+
+A frontend that looks or works differently can replace the default one, and is best kept in a repository of its own. It needs only to:
+
+1. Build with `npm install && npm run build` into a `dist/` folder holding an `index.html`.
+2. Refer to its files by relative paths, as Vite does with `base: './'`, so that the site also works under a path of another website.
+3. Talk to the backend only through its HTTP API: `/api/...` (listed at `/docs` on a running site), `/images/{id}?size=thumbnail` or `full`, `/models/{id}` for 3D models, and `/documents/{id}` for PDFs.
+
+The backend serves `dist/` at the root of the site and fills the `<title>` and `<meta name="description">` of `index.html` from `collection.json`. A frontend may also write `dist/frontend.json`, as `{"media": ["3d"]}`, to say which kinds of material it shows; `python -m src.environment` reports it.
+
+To use one, clone it into `src/frontend/<name>` and run `npm run setup -- --frontend=<name>`, or give `--frontend` the path to a folder elsewhere.
 
 ## Coding Standards
 

@@ -2,109 +2,155 @@
 
 const fs = require('fs');
 const path = require('path');
-const chalk = require('chalk');
+const readline = require('readline');
 const { execSync } = require('child_process');
+const chalk = require('chalk');
+const {
+  CONFIG_PATH,
+  DEFAULT_FRONTEND,
+  LEGACY_TYPES,
+  MEDIA,
+  ROOT,
+  choiceOf,
+  dependenciesOf,
+  frontendDir,
+  readConfig,
+  viewerDir,
+  writeConfig,
+} = require('./frontend/frontends');
 
-// Parse command line arguments
+const HELP = `Usage: npm run setup -- [options]
+
+Builds the site's frontend. Photos and other images are always shown.
+Add what else the collection holds, and only those packages are installed.
+
+Options:
+  --with=<kinds>         also show these, separated by commas, or none:
+${Object.entries(MEDIA).map(([name, { label }]) => `                           ${name.padEnd(5)} ${label}`).join('\n')}
+  --frontend=<name>      build another frontend: a folder in src/frontend,
+                         or a path to one (default: ${DEFAULT_FRONTEND})
+  --help, -h             show this help
+
+Without --with, setup asks, or keeps the choice already in config.json.`;
+
 const args = process.argv.slice(2);
-const helpArg = args.includes('--help') || args.includes('-h');
-const typeArg = args.find(arg => arg.startsWith('--type='));
+const option = (name) => {
+  const arg = args.find((value) => value.startsWith(`--${name}=`));
+  return arg === undefined ? undefined : arg.slice(name.length + 3);
+};
 
-// Available collection types
-const COLLECTION_TYPES = ['photographs', 'maps', 'documents'];
-
-// Show help if requested or if no type is provided
-if (helpArg || !typeArg) {
-  console.log(chalk.blue('Digital Collections Explorer - Setup'));
-  console.log(chalk.gray('Configure your collection explorer instance\n'));
-  console.log('Usage: npm run setup -- --type=<collection-type> [options]');
-  console.log('\nOptions:');
-  console.log('  --type=<collection-type>  Specify the collection type (required)');
-  console.log('                           Available types: photographs, maps, documents');
-  console.log('  --help, -h               Show this help message');
-  process.exit(helpArg ? 0 : 1);
-}
-
-// Extract collection type from argument
-const collectionType = typeArg.split('=')[1];
-
-// Validate collection type
-if (!COLLECTION_TYPES.includes(collectionType)) {
-  console.error(chalk.red(`Error: Invalid collection type '${collectionType}'`));
-  console.log(chalk.gray(`Available types: ${COLLECTION_TYPES.join(', ')}`));
+const fail = (message, hint) => {
+  console.error(chalk.red(`Error: ${message}`));
+  if (hint) {
+    console.log(chalk.yellow(hint));
+  }
   process.exit(1);
-}
+};
 
-console.log(chalk.blue('Digital Collections Explorer - Setup'));
-console.log(chalk.gray(`Configuring for collection type: ${chalk.cyan(collectionType)}\n`));
+const parseMedia = (value) => {
+  const names = value.split(',').map((name) => name.trim().toLowerCase()).filter(Boolean);
+  const media = names.filter((name) => name !== 'none');
+  const unknown = media.filter((name) => !MEDIA[name]);
+  if (unknown.length) {
+    fail(`Unknown kind: ${unknown.join(', ')}`, `Choose from: ${Object.keys(MEDIA).join(', ')}, or none`);
+  }
+  return [...new Set(media)];
+};
 
-// Update configuration with selected options
-updateConfig(collectionType);
+const ask = (question) => new Promise((resolve) => {
+  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+  prompt.question(question, (answer) => {
+    prompt.close();
+    resolve(answer.trim().toLowerCase());
+  });
+});
 
-// Install frontend dependencies and build
-installAndBuildFrontend(collectionType);
-
-console.log(chalk.green('\n✓ Setup completed successfully!'));
-console.log(chalk.yellow('\n Go check README.md for the next step.'));
-
-// Function to update `config.json` with the user's selections
-function updateConfig(collectionType) {
-  console.log(chalk.gray('Updating configuration...'));
-  
-  try {
-    const configPath = path.resolve(process.cwd(), 'config.json');
-    
-    if (!fs.existsSync(configPath)) {
-      console.error(chalk.red(`Error: Configuration file not found: ${configPath}`));
-      console.log(chalk.yellow('Make sure you have a config.json file in the project root.'));
-      process.exit(1);
+const askForMedia = async (current) => {
+  console.log('Photos and other images are always shown. Does the collection also hold:');
+  const chosen = [];
+  for (const [name, { label }] of Object.entries(MEDIA)) {
+    const isChosen = current.includes(name);
+    const answer = await ask(`  ${label}? ${isChosen ? '[Y/n]' : '[y/N]'} `);
+    if (answer ? answer.startsWith('y') : isChosen) {
+      chosen.push(name);
     }
-    
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    
-    config.collection_type = collectionType;
-    
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    console.log(chalk.green('✓ config.json updated'));
-    
-  } catch (error) {
-    console.error(chalk.red(`Error updating configuration: ${error.message}`));
-    process.exit(1);
   }
-}
+  return chosen;
+};
 
-// Function to install dependencies and build the frontend
-function installAndBuildFrontend(collectionType) {
-  const frontendDir = path.resolve(process.cwd(), 'src', 'frontend', collectionType);
-  
-  // Check if the frontend directory exists
-  if (!fs.existsSync(frontendDir)) {
-    console.error(chalk.red(`Error: Frontend directory not found: ${frontendDir}`));
-    console.log(chalk.yellow(`Make sure you have created the ${collectionType} frontend implementation.`));
-    process.exit(1);
+const chooseMedia = async (current) => {
+  const listed = option('with');
+  if (listed !== undefined) {
+    return parseMedia(listed);
   }
-  
-  // Install dependencies
-  console.log(chalk.gray(`Installing frontend dependencies for ${collectionType}...`));
+  const type = option('type');
+  if (type !== undefined) {
+    if (!LEGACY_TYPES[type]) {
+      fail(`Unknown collection type '${type}'`, 'Use --with instead. See npm run setup -- --help');
+    }
+    console.log(chalk.yellow(`--type is replaced by --with. Building with --with=${LEGACY_TYPES[type].join(',') || 'none'}\n`));
+    return LEGACY_TYPES[type];
+  }
+  if (process.stdin.isTTY) {
+    return askForMedia(current);
+  }
+  return current;
+};
+
+const run = (command, cwd) => {
   try {
-    process.chdir(frontendDir);
-    execSync('npm install', { stdio: 'inherit' });
-    console.log(chalk.green('✓ Frontend dependencies installed'));
+    execSync(command, { cwd, stdio: 'inherit' });
   } catch (error) {
-    console.error(chalk.red(`Error installing frontend dependencies: ${error.message}`));
-    process.exit(1);
+    fail(`${command} failed in ${path.relative(ROOT, cwd) || '.'}: ${error.message}`);
   }
-  
-  // Build the frontend
-  console.log(chalk.gray(`Building frontend for ${collectionType}...`));
-  try {
-    execSync('npm run build', { stdio: 'inherit' });
-    console.log(chalk.green('✓ Frontend built successfully'));
-  } catch (error) {
-    console.error(chalk.red(`Error building frontend: ${error.message}`));
-    process.exit(1);
+};
+
+const main = async () => {
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(HELP);
+    return;
   }
-  
-  // Return to the project root
-  process.chdir(process.cwd());
-}
+  if (!fs.existsSync(CONFIG_PATH)) {
+    fail(`Configuration file not found: ${CONFIG_PATH}`, 'Make sure you have a config.json file in the project root.');
+  }
+
+  const config = readConfig();
+  const current = choiceOf(config);
+  const frontend = option('frontend') || current.frontend;
+  const dir = frontendDir(frontend);
+  if (!fs.existsSync(path.join(dir, 'package.json'))) {
+    fail(`No frontend found at ${dir}`, 'Clone a frontend into src/frontend/<name>, then run setup with --frontend=<name>.');
+  }
+  const isDefault = dir === frontendDir(DEFAULT_FRONTEND);
+
+  console.log(chalk.blue('Digital Collections Explorer - Setup\n'));
+  const media = await chooseMedia(current.media);
+
+  const {
+    collection_type: _type, frontend: _frontend, media: _media, ...rest
+  } = config;
+  writeConfig({ frontend, media, ...rest });
+  console.log(chalk.green(`\n✓ config.json: frontend ${frontend}, showing photos${media.map((name) => `, ${name}`).join('')}`));
+
+  console.log(chalk.gray(`\nInstalling the ${frontend} frontend...`));
+  run('npm install', dir);
+  if (isDefault) {
+    media.filter((name) => dependenciesOf(viewerDir(name)).length).forEach((name) => {
+      console.log(chalk.gray(`\nInstalling the ${name} viewer...`));
+      run('npm install', viewerDir(name));
+    });
+  }
+
+  console.log(chalk.gray('\nBuilding...'));
+  run('npm run build', dir);
+  console.log(chalk.green('\n✓ Setup completed successfully!'));
+
+  const python = media.flatMap((name) => MEDIA[name].python);
+  if (python.length) {
+    console.log(chalk.yellow('\nIndexing these needs a few more Python packages:'));
+    python.forEach((command) => console.log(`  ${command}`));
+  }
+  console.log(chalk.yellow('\nGo check README.md for the next step.'));
+};
+
+main();

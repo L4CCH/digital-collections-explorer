@@ -7,7 +7,6 @@ protobuf>=3.20.0
 open_clip_torch>=2.20.0
 ftfy>=6.1.1
 regex>=2023.0.0
-PyPDF2>=3.0.0
 
 # Backend
 fastapi>=0.100.0
@@ -15,7 +14,6 @@ uvicorn>=0.22.0
 pydantic-settings>=2.10.0
 python-multipart>=0.0.33
 pillow>=9.5.0
-pdf2image>=1.16.0
 numpy>=1.24.0
 pandas>=2.0.0
 pydantic>=2.0.0
@@ -25,9 +23,6 @@ mcp>=2.3.0,<3
 # Collection sources (S3 buckets and parquet manifests)
 boto3>=1.28.0
 duckdb>=1.0.0
-
-# 3D models: rendering views needs Chromium too (python -m playwright install chromium)
-playwright>=1.64.1
 
 # Data processing
 scikit-learn>=1.2.0

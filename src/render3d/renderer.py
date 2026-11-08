@@ -8,11 +8,15 @@ from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
 
+from src.backend.core.config import DEFAULT_FRONTEND, FRONTENDS_DIR
+
 from .models import Model, is_remote
 from .views import View
 
 PAGE_DIR = Path(__file__).parent / "page"
-THREE_DIR = Path(__file__).resolve().parents[2] / "node_modules" / "three"
+THREE_DIR = (
+    FRONTENDS_DIR / DEFAULT_FRONTEND / "viewers" / "3d" / "node_modules" / "three"
+)
 HOST = "http://render.dce.invalid"
 CHROMIUM_ARGS = ["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 CONTENT_TYPES = {
@@ -87,7 +91,8 @@ class Renderer:
     def __enter__(self) -> Renderer:
         if not (THREE_DIR / "build" / "three.module.js").exists():
             raise RendererUnavailable(
-                "three.js is missing. Run npm install in the repository folder first."
+                "three.js is missing. Install the 3D viewer first:\n"
+                "  npm run setup -- --with=3d"
             )
         try:
             from playwright.sync_api import sync_playwright

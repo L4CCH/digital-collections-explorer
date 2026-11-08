@@ -38,7 +38,7 @@ Paste error logs here
 - **OS**: [e.g., macOS 13.0, Ubuntu 22.04, Windows 11]
 - **Python Version**: [e.g., 3.10.5]
 - **Node.js Version**: [e.g., 18.12.0]
-- **Collection Type**: [photographs/maps/documents]
+- **Kinds of material** (`media` in config.json): [e.g., none, 3d, pdf, zoom]
 - **CLIP Model**: [e.g., openai/clip-vit-base-patch32]
 - **Browser** (if frontend issue): [e.g., Chrome 120, Firefox 121]
 
@@ -48,7 +48,8 @@ Please share relevant parts of your `config.json` (remove any sensitive informat
 
 ```json
 {
-  "collection_type": "photographs",
+  "frontend": "default",
+  "media": ["pdf"],
   "model_config": {
     "clip_model": "openai/clip-vit-base-patch32"
   }

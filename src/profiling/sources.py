@@ -21,8 +21,12 @@ IMAGE_EXTS = {
     "heif",
     "avif",
 }
+DOCUMENT_EXTS = {"pdf"}
+MODEL_EXTS = {"glb", "gltf"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini", ".picasa.ini"}
 JUNK_DIRS = {".git", "__pycache__", ".cache", "node_modules", ".thumbnails"}
+MODEL_COLUMNS = ("model_url", "model", "glb", "gltf", "3d_model")
+IIIF_COLUMNS = ("iiif", "iiif_url", "iiif_image", "iiif_service", "iiif_info")
 URL_COLUMN_GUESSES = ["image_url", "url", "path", "file", "uri"]
 SIZE_COLUMN_GUESSES = ["size_bytes", "size", "bytes", "filesize"]
 JPEG_MAGIC = b"\xff\xd8\xff"
@@ -44,6 +48,7 @@ class FileRef:
     ext: str
     is_image: bool
     is_junk: bool = False
+    is_document: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -65,6 +70,7 @@ def classify(key: str, size: int, extra: dict | None = None) -> FileRef:
         ext=ext,
         is_image=ext in IMAGE_EXTS,
         is_junk=junk,
+        is_document=ext in DOCUMENT_EXTS,
         extra=extra or {},
     )
 

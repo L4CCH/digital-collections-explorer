@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image, ImageFile
 
 from src.backend.services.catalog_fields import (
+    iiif_info_from,
     model_url_from,
     object_id_from,
     source_url_from,
@@ -22,13 +23,13 @@ from src.backend.services.catalog_fields import (
 )
 from src.profiling.sources import FileRef, Source
 
+from .documents import Pdf, page_key
 from .state import IngestState, Result
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Largest image seen in the Smithsonian NMAH collection was 123 megapixels.
 Image.MAX_IMAGE_PIXELS = 400_000_000
 
-# Same output sizes and JPEG quality as src/models/generate_embeddings.py.
 THUMBNAIL_EDGE = 400
 THUMBNAIL_QUALITY = 80
 PROCESSED_EDGE = 1920
@@ -69,6 +70,60 @@ class Item:
     blob: bytes | None = None
     image: Image.Image | None = None
     metadata: dict = field(default_factory=dict)
+    page_key: str | None = None
+    document: Document | None = None
+
+
+@dataclass
+class Document:
+    item: Item
+    results: queue.Queue
+    pages: int = 0
+    unfinished: int = 0
+    failed: int = 0
+    error: str | None = None
+    listed: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def page_started(self) -> None:
+        with self.lock:
+            self.unfinished += 1
+
+    def page_finished(self, ok: bool) -> None:
+        with self.lock:
+            self.unfinished -= 1
+            self.failed += 0 if ok else 1
+            is_last = self.listed and not self.unfinished
+        if is_last:
+            self.finish()
+
+    def all_pages_started(self, error: str | None = None) -> None:
+        with self.lock:
+            self.listed = True
+            self.error = error
+            is_last = not self.unfinished
+        if is_last:
+            self.finish()
+
+    def finish(self) -> None:
+        error = self.error
+        if not error and self.failed:
+            error = f"{self.failed} of {self.pages} pages could not be indexed"
+        if not error and not self.pages:
+            error = "the PDF has no pages"
+        self.results.put(
+            Result(
+                self.item.item_id,
+                "failed" if error else "done",
+                error,
+                elapsed_ms(self.item),
+                {
+                    "type": "pdf",
+                    "file_name": self.item.ref.basename,
+                    "pages": self.pages,
+                },
+            )
+        )
 
 
 @dataclass
@@ -124,9 +179,18 @@ def elapsed_ms(item: Item) -> int:
     return int((time.time() - item.started) * 1000)
 
 
+def describe_error(stage: str, error: Exception) -> str:
+    return f"{stage}: {type(error).__name__}: {error}"[:MAX_ERROR_LENGTH]
+
+
 def failure(item: Item, stage: str, error: Exception) -> Result:
-    message = f"{stage}: {type(error).__name__}: {error}"[:MAX_ERROR_LENGTH]
-    return Result(item.item_id, "failed", message, elapsed_ms(item))
+    return Result(
+        item.item_id,
+        "failed",
+        describe_error(stage, error),
+        elapsed_ms(item),
+        page_key=item.page_key,
+    )
 
 
 def save_resized(image: Image.Image, edge: int, quality: int, path: Path) -> None:
@@ -163,6 +227,135 @@ def download_worker(
             results.put(failure(item, "download", error))
 
 
+def catalog_metadata(catalog: dict | None) -> dict:
+    if not catalog:
+        return {}
+    optional = {
+        "model_url": model_url_from(catalog),
+        "view_orbit": view_orbit_from(catalog),
+        "iiif": iiif_info_from(catalog),
+        **{
+            name: str(catalog[name])
+            for name in ("title", "description")
+            if catalog.get(name)
+        },
+    }
+    return {
+        "catalog": catalog,
+        "object_id": object_id_from(catalog),
+        "source_url": source_url_from(catalog),
+        **{name: value for name, value in optional.items() if value},
+    }
+
+
+def keep_copies(image: Image.Image, key: str, options: Options) -> dict:
+    processed_path = sharded_path(options.processed_dir, key)
+    thumbnail_path = sharded_path(options.thumbnails_dir, key)
+    save_resized(image, PROCESSED_EDGE, PROCESSED_QUALITY, processed_path)
+    save_resized(image, THUMBNAIL_EDGE, THUMBNAIL_QUALITY, thumbnail_path)
+    return {
+        "processed": stored_path(processed_path, options.data_dir),
+        "thumbnail": stored_path(thumbnail_path, options.data_dir),
+    }
+
+
+def model_input(image: Image.Image) -> Image.Image:
+    image.thumbnail((MODEL_INPUT_EDGE, MODEL_INPUT_EDGE), Image.Resampling.LANCZOS)
+    return image
+
+
+def decode_image(source: Source, options: Options, item: Item) -> None:
+    image = Image.open(io.BytesIO(item.blob))
+    width, height = image.size
+    image.draft("RGB", (PROCESSED_EDGE, PROCESSED_EDGE))
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    image.load()
+
+    if max(image.size) > PROCESSED_EDGE:
+        image.thumbnail((PROCESSED_EDGE, PROCESSED_EDGE), Image.Resampling.LANCZOS)
+    copies = keep_copies(image, item.ref.key, options)
+
+    original = source.original_uri(item.ref)
+    item.metadata = {
+        "file_name": item.ref.basename,
+        "type": "image",
+        "width": width,
+        "height": height,
+        "source_uri": original,
+        "paths": {
+            "original": original if os.path.exists(original) else copies["processed"],
+            **copies,
+        },
+        **catalog_metadata(item.ref.extra.get("row")),
+    }
+    item.image = model_input(image)
+
+
+def can_be_opened(address: str) -> bool:
+    return address.startswith(("http://", "https://")) or os.path.exists(address)
+
+
+def split_document(
+    source: Source,
+    options: Options,
+    item: Item,
+    outbox: queue.Queue,
+    results: queue.Queue,
+) -> None:
+    document = Document(item, results)
+    try:
+        pdf = Pdf(item.blob)
+    except Exception as error:
+        document.all_pages_started(describe_error("decode", error))
+        return
+    document.pages = pdf.pages
+    original = source.original_uri(item.ref)
+    catalog = item.ref.extra.get("row")
+    shared = {
+        "file_name": item.ref.basename,
+        "type": "pdf_page",
+        "pages": pdf.pages,
+        "source_uri": original,
+        **({"document": original} if can_be_opened(original) else {}),
+        "document_key": item.ref.key,
+        **catalog_metadata(catalog),
+    }
+    error = None
+    try:
+        for index in range(pdf.pages):
+            key = page_key(item.ref.key, index + 1)
+            page = Item(
+                ref=item.ref,
+                item_id=make_item_id(key),
+                started=item.started,
+                page_key=key,
+                document=document,
+            )
+            document.page_started()
+            try:
+                image = pdf.render(index, PROCESSED_EDGE)
+                copies = keep_copies(image, key, options)
+            except Exception as page_error:
+                results.put(failure(page, "decode", page_error))
+                document.page_finished(ok=False)
+                continue
+            page.metadata = {
+                **shared,
+                "page": index + 1,
+                "width": image.width,
+                "height": image.height,
+                "paths": {"original": copies["processed"], **copies},
+            }
+            page.image = model_input(image)
+            outbox.put(page)
+    except Exception as stopped:
+        error = describe_error("decode", stopped)
+    finally:
+        pdf.close()
+        document.all_pages_started(error)
+
+
 def decode_worker(
     source: Source,
     options: Options,
@@ -176,60 +369,11 @@ def decode_worker(
         if item is None:
             return
         try:
-            image = Image.open(io.BytesIO(item.blob))
-            width, height = image.size
-            image.draft("RGB", (PROCESSED_EDGE, PROCESSED_EDGE))
-            if image.mode != "RGB":
-                image = image.convert("RGB")
-            image.load()
-
-            if max(image.size) > PROCESSED_EDGE:
-                image.thumbnail(
-                    (PROCESSED_EDGE, PROCESSED_EDGE), Image.Resampling.LANCZOS
-                )
-            processed_path = sharded_path(options.processed_dir, item.ref.key)
-            thumbnail_path = sharded_path(options.thumbnails_dir, item.ref.key)
-            save_resized(image, PROCESSED_EDGE, PROCESSED_QUALITY, processed_path)
-            save_resized(image, THUMBNAIL_EDGE, THUMBNAIL_QUALITY, thumbnail_path)
-
-            original = source.original_uri(item.ref)
-            item.metadata = {
-                "file_name": item.ref.basename,
-                "type": "image",
-                "width": width,
-                "height": height,
-                "source_uri": original,
-                "paths": {
-                    "original": (
-                        original
-                        if os.path.exists(original)
-                        else stored_path(processed_path, options.data_dir)
-                    ),
-                    "processed": stored_path(processed_path, options.data_dir),
-                    "thumbnail": stored_path(thumbnail_path, options.data_dir),
-                },
-            }
-            catalog = item.ref.extra.get("row")
-            if catalog:
-                item.metadata["catalog"] = catalog
-                item.metadata["object_id"] = object_id_from(catalog)
-                item.metadata["source_url"] = source_url_from(catalog)
-                model_url = model_url_from(catalog)
-                if model_url:
-                    item.metadata["model_url"] = model_url
-                view_orbit = view_orbit_from(catalog)
-                if view_orbit:
-                    item.metadata["view_orbit"] = view_orbit
-                for shown_by_frontend in ("title", "description"):
-                    if catalog.get(shown_by_frontend):
-                        item.metadata[shown_by_frontend] = str(
-                            catalog[shown_by_frontend]
-                        )
-            image.thumbnail(
-                (MODEL_INPUT_EDGE, MODEL_INPUT_EDGE), Image.Resampling.LANCZOS
-            )
-            item.image = image
-            outbox.put(item)
+            if item.ref.is_document:
+                split_document(source, options, item, outbox, results)
+            else:
+                decode_image(source, options, item)
+                outbox.put(item)
         except Exception as error:
             results.put(failure(item, "decode", error))
         finally:
@@ -252,21 +396,28 @@ def encode_worker(
             return
         try:
             vectors = service.encode_image([item.image for item in batch]).numpy()
-            vectors = vectors.astype(np.float32)
-            for item, vector in zip(batch, vectors):
-                results.put(
+        except Exception as error:
+            outcomes = [(item, failure(item, "encode", error)) for item in batch]
+        else:
+            outcomes = [
+                (
+                    item,
                     Result(
                         item.item_id,
                         "done",
                         None,
                         elapsed_ms(item),
                         item.metadata,
-                        vector.tobytes(),
-                    )
+                        vector.astype(np.float32).tobytes(),
+                        item.page_key,
+                    ),
                 )
-        except Exception as error:
-            for item in batch:
-                results.put(failure(item, "encode", error))
+                for item, vector in zip(batch, vectors)
+            ]
+        for item, result in outcomes:
+            results.put(result)
+            if item.document is not None:
+                item.document.page_finished(result.status == "done")
         batch.clear()
 
     while finished_upstream < upstream_workers:
@@ -295,6 +446,8 @@ def write_worker(
                 break
             continue
         state.record(result)
+        if result.page_key is not None:
+            continue
         with stats.lock:
             if result.status == "done":
                 stats.done += 1

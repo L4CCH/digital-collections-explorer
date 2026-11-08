@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import mcp_server
 from .api.routes import browse, embeddings, images, search
-from .core.config import settings
+from .core.config import built_frontend, settings
 from .services import site_pages
 from .services.collection_service import DEFAULT_COLLECTION, collection_service
 from .services.embedding_service import embedding_service
@@ -174,7 +174,7 @@ async def llms():
     )
 
 
-frontend_dir = Path(f"src/frontend/{settings.collection_type}/dist")
+frontend_dir = built_frontend(settings.frontend)
 
 
 @app.get("/", include_in_schema=False)

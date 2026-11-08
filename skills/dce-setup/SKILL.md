@@ -70,14 +70,10 @@ $PY -m src.environment
 ```
 
 This prints JSON. Note `device`, `memory_bytes`, `free_disk_bytes`,
-`aws_credentials_found`, `existing_index`, and `frontend_built`. Do not show the
-JSON to the person. Use it to make decisions later.
-
-If `frontend_built` is false, build it once:
-
-```bash
-npm install && npm run setup -- --type=photographs
-```
+`aws_credentials_found`, `existing_index`, `frontend_built`, `frontend_media`
+and `python_packages`. Do not show the JSON to the person. Use it to make
+decisions later. The site is built after step 2, once you know what the
+collection holds.
 
 ## Step 2. Look at the collection
 
@@ -99,12 +95,27 @@ first. The usual cause is a manifest whose URL column points to web pages rather
 than files. Ask where the actual files are stored, then rerun with
 `--fetch-via s3://bucket`. Estimates are meaningless until this is resolved.
 
+`media` in the profile lists what the collection holds besides photos: `pdf`
+for PDFs, `3d` for 3D models, `zoom` for records that name an IIIF image
+service. Build the site for exactly those, unless `frontend_built` is true and
+`frontend_media` already matches:
+
+```bash
+npm install && npm run setup -- --with=MEDIA
+```
+
+`MEDIA` is the list joined by commas, or `none`. Then install the Python
+packages the list needs, unless `python_packages` says they are there:
+`$PY -m pip install -r requirements-pdf.txt` for `pdf`, and
+`$PY -m pip install -r requirements-3d.txt` for `3d`.
+
 ## Step 3. Tell the person what you found
 
 Summarize the report in a few short paragraphs, in this order:
 
-1. What is there: how many images, how large, and anything surprising such as
-   images with no catalog record, non-image files, or damaged files. If the
+1. What is there: how many images, how large, how many PDFs and 3D models, and
+   anything surprising such as images with no catalog record, non-image files,
+   or damaged files. If the
    report lists files that may be a catalog (spreadsheets, CSV), mention them.
    Say plainly when one looks empty. Say honestly that a catalog file is not
    used yet, so the person does not expect its contents to appear in the site.
@@ -166,14 +177,16 @@ Add `--limit N` for a sample run.
 - Original images are streamed and never stored. Only small copies are kept.
 - A few failures are normal in real collections. Report the count and the
   reasons from `problems`. Investigate only if failures exceed a few percent.
+- Each page of a PDF becomes one image of the document, and the document's page
+  shows its pages in order. A PDF whose pages partly failed is read again by
+  `--retry-failed`.
 - `$PY -m src.ingest --report --data-dir data/collections/NAME` prints how the run
   went in plain words at any time, including for a run that finished long ago.
 
 ### 3D models
 
-If the collection holds `.glb` models (the profile counts them among the files
-that are not images), or its manifest has a `model_url` column, render the
-models before building the index:
+If `media` in the profile includes `3d`, render the models before building the
+index:
 
 ```bash
 $PY -m playwright install chromium
