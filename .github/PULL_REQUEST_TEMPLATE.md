@@ -27,9 +27,8 @@ Fixes #(issue)
 <!-- Mark all that apply -->
 
 - [ ] Backend (Python/FastAPI)
-- [ ] Frontend - Photographs
-- [ ] Frontend - Maps
-- [ ] Frontend - Documents
+- [ ] Frontend
+- [ ] 3D, PDF or zoom viewer
 - [ ] CLIP/ML models
 - [ ] Configuration
 - [ ] Documentation
