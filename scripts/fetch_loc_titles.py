@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 import pandas as pd
@@ -16,12 +17,18 @@ CSV_PATH = "input/merged_files.csv"
 TITLES_PATH = "input/loc_titles.json"
 PAGES_DIR = "input/loc_titles_pages"
 ITEMS_PATH = "input/loc_titles_items.json"
-SEARCH_URL = "https://www.loc.gov/maps/?fo=json&c=1000&at=results,pagination&sp={page}"
+LISTINGS = {
+    "maps": "https://www.loc.gov/maps/",
+    "sanborn": "https://www.loc.gov/collections/sanborn-maps/",
+    "gmd": "https://www.loc.gov/search/?fa=partof:geography+and+map+division",
+}
+PAGE_QUERY = "fo=json&c=1000&at=results,pagination&sp={page}"
 ITEM_URL = "{item}?fo=json&at=item"
 USER_AGENT = "digital-collections-explorer (https://github.com/L4CCH/digital-collections-explorer)"
-# loc.gov allows 80 search requests a minute and 200 item requests a minute.
-SEARCH_PAUSE_SECONDS = 3
-ITEM_PAUSE_SECONDS = 0.4
+# Well under loc.gov's published limits, which it enforces by blocking for up to an hour.
+SEARCH_PAUSE_SECONDS = 5
+ITEM_PAUSE_SECONDS = 3
+BLOCKED_WAIT_SECONDS = 15 * 60
 
 
 def get_json(url: str, attempts: int = 5) -> dict:
@@ -31,7 +38,8 @@ def get_json(url: str, attempts: int = 5) -> dict:
             with urllib.request.urlopen(request, timeout=120) as response:
                 return json.load(response)
         except (OSError, http.client.HTTPException, json.JSONDecodeError) as error:
-            wait = 60 * (attempt + 1)
+            blocked = isinstance(error, urllib.error.HTTPError) and error.code == 429
+            wait = BLOCKED_WAIT_SECONDS if blocked else 60 * (attempt + 1)
             print(f"{url}: {error}; trying again in {wait} seconds")
             time.sleep(wait)
     raise RuntimeError(f"Could not read {url}")
@@ -60,33 +68,33 @@ def fetch_titles():
 
     os.makedirs(PAGES_DIR, exist_ok=True)
     found = {}
-    page, pages = 1, 1
-    while page <= pages:
-        saved = os.path.join(PAGES_DIR, f"{page}.json")
-        if os.path.exists(saved):
-            with open(saved) as f:
-                kept = json.load(f)
-        else:
-            data = get_json(SEARCH_URL.format(page=page))
-            kept = {
-                "pages": data["pagination"]["total"],
-                "found": {
-                    key_of(record.get("id") or ""): described(record)
-                    for record in data["results"]
-                },
-            }
-            with open(saved, "w") as f:
-                json.dump(kept, f)
-            time.sleep(SEARCH_PAUSE_SECONDS)
-        pages = kept["pages"]
-        found.update({k: v for k, v in kept["found"].items() if k in wanted})
-        print(f"page {page} of {pages}: {len(found)} of {len(wanted)} items found")
-        page += 1
+    for name, listing in LISTINGS.items():
+        page, pages = 1, 1
+        while page <= pages and wanted - found.keys():
+            saved = os.path.join(PAGES_DIR, f"{name}-{page}.json")
+            if os.path.exists(saved):
+                with open(saved) as f:
+                    kept = json.load(f)
+            else:
+                joiner = "&" if "?" in listing else "?"
+                data = get_json(listing + joiner + PAGE_QUERY.format(page=page))
+                kept = {
+                    "pages": data["pagination"]["total"],
+                    "found": {
+                        key_of(record.get("id") or ""): described(record)
+                        for record in data["results"]
+                    },
+                }
+                with open(saved, "w") as f:
+                    json.dump(kept, f)
+                time.sleep(SEARCH_PAUSE_SECONDS)
+            pages = kept["pages"]
+            found.update({k: v for k, v in kept["found"].items() if k in wanted})
+            print(f"{name} page {page} of {pages}: {len(found)} of {len(wanted)} found")
+            page += 1
 
     missing = sorted(wanted - found.keys())
-    print(
-        f"{len(missing)} items are not in the maps search; reading them one at a time"
-    )
+    print(f"{len(missing)} items are in no listing; reading them one at a time")
     items = {}
     if os.path.exists(ITEMS_PATH):
         with open(ITEMS_PATH) as f:
