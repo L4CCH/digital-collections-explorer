@@ -21,7 +21,7 @@ ITEM_URL = "{item}?fo=json&at=item"
 USER_AGENT = "digital-collections-explorer (https://github.com/L4CCH/digital-collections-explorer)"
 # loc.gov allows 80 search requests a minute and 200 item requests a minute.
 SEARCH_PAUSE_SECONDS = 3
-ITEM_PAUSE_SECONDS = 1
+ITEM_PAUSE_SECONDS = 0.4
 
 
 def get_json(url: str, attempts: int = 5) -> dict:
