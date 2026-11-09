@@ -76,6 +76,20 @@ def test_an_image_kept_on_an_iiif_server_is_loaded_from_there(backend, monkeypat
     assert response.headers["cache-control"] == "public, max-age=86400"
 
 
+def test_an_image_with_only_an_iiif_service_is_sent_to_it(backend, monkeypatch):
+    from src.backend.api.routes import images
+
+    service = "https://tile.loc.gov/image-services/iiif/service:gmd:a"
+    document = {"metadata": {"iiif": f"{service}/info.json"}}
+    monkeypatch.setattr(
+        images.embedding_service, "get_document_by_id", lambda item_id: document
+    )
+    response = asyncio.run(images.get_image_by_id("a", size="thumbnail"))
+    assert response.headers["location"] == f"{service}/full/!400,400/0/default.jpg"
+    response = asyncio.run(images.get_image_by_id("a", size="full"))
+    assert response.headers["location"] == f"{service}/full/!1920,1920/0/default.jpg"
+
+
 def test_frontend_files_named_by_content_are_kept_and_the_rest_checked(
     backend, tmp_path
 ):

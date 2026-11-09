@@ -76,3 +76,37 @@ def iiif_info_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
         service = IIIF_IMAGE_REQUEST.sub("", value.split("?", 1)[0].rstrip("/"))
         return f"{service}/info.json"
     return None
+
+
+# The longest edges ingest gives the copies it keeps, so a source's images show at the same sizes.
+IIIF_SIZES = {"thumbnail": "!400,400", "full": "!1920,1920"}
+
+
+def is_web_address(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith(("http://", "https://"))
+
+
+def image_source(metadata: Dict[str, Any], size: str) -> Optional[str]:
+    """Where an image is kept at a size, on this site or at a web address"""
+    paths = metadata.get("paths") or {}
+    info = metadata.get("iiif") or iiif_info_from(metadata.get("catalog"))
+    service = info.removesuffix("/info.json") if is_web_address(info) else None
+
+    def from_service(name: str) -> Optional[str]:
+        return f"{service}/full/{IIIF_SIZES[name]}/0/default.jpg" if service else None
+
+    if size == "thumbnail":
+        kept = (
+            paths.get("thumbnail"),
+            from_service("thumbnail"),
+            paths.get("processed"),
+        )
+    else:
+        kept = (paths.get("processed"), from_service("full"))
+    return next((place for place in kept if place), None)
+
+
+def image_urls(metadata: Dict[str, Any]) -> Dict[str, str]:
+    """The web addresses a browser can load an image from without asking this site"""
+    found = {size: image_source(metadata, size) for size in IIIF_SIZES}
+    return {size: place for size, place in found.items() if is_web_address(place)}

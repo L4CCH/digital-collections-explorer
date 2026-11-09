@@ -9,7 +9,12 @@ from src.backend.core.config import (
     built_frontend,
     load_config,
 )
-from src.backend.services.catalog_fields import iiif_info_from, servable_model
+from src.backend.services.catalog_fields import (
+    iiif_info_from,
+    image_source,
+    image_urls,
+    servable_model,
+)
 from src.backend.services.collection_service import CollectionService
 from src.backend.services.collection_store import upgrade_old_pages
 from src.backend.services.embedding_service import EmbeddingService
@@ -84,6 +89,59 @@ def test_a_record_that_names_an_iiif_service_can_be_zoomed(tmp_path):
     collection = CollectionService(embeddings)
     assert collection.item("map")["metadata"]["iiif"] == f"{SERVICE}/info.json"
     assert "iiif" not in collection.item("photo")["metadata"]
+
+
+def test_images_kept_on_the_site_are_served_by_it_even_when_a_service_exists():
+    kept = {
+        "paths": {"thumbnail": "thumbnails/a.jpg", "processed": "processed/a.jpg"},
+        "iiif": f"{SERVICE}/info.json",
+    }
+    assert image_source(kept, "thumbnail") == "thumbnails/a.jpg"
+    assert image_source(kept, "full") == "processed/a.jpg"
+    assert image_urls(kept) == {}
+
+
+def test_images_named_by_web_address_are_loaded_from_there():
+    linked = {
+        "paths": {
+            "thumbnail": f"{SERVICE}/full/400,/0/default.jpg",
+            "processed": f"{SERVICE}/full/2000,/0/default.jpg",
+        }
+    }
+    assert image_urls(linked) == {
+        "thumbnail": f"{SERVICE}/full/400,/0/default.jpg",
+        "full": f"{SERVICE}/full/2000,/0/default.jpg",
+    }
+
+
+def test_an_image_with_only_an_iiif_service_is_requested_from_it_at_each_size():
+    expected = {
+        "thumbnail": f"{SERVICE}/full/!400,400/0/default.jpg",
+        "full": f"{SERVICE}/full/!1920,1920/0/default.jpg",
+    }
+    assert image_urls({"iiif": f"{SERVICE}/info.json"}) == expected
+    assert image_urls({"catalog": {"iiif_url": SERVICE}}) == expected
+    assert image_source({"paths": {"processed": "processed/a.jpg"}}, "thumbnail") == (
+        "processed/a.jpg"
+    )
+    assert image_source({}, "full") is None
+
+
+def test_results_say_where_a_browser_can_load_their_images(tmp_path):
+    embeddings = EmbeddingService()
+    embeddings.embeddings_dir = str(tmp_path)
+    embeddings.item_ids = ["map", "photo"]
+    embeddings.metadata = {
+        "map": {"catalog": {"title": "Map", "iiif": SERVICE}},
+        "photo": {"paths": {"thumbnail": "thumbnails/p.jpg"}},
+    }
+    embeddings.embeddings = torch.nn.functional.normalize(torch.rand(2, 4), dim=-1)
+    embeddings.is_loaded = True
+    collection = CollectionService(embeddings)
+    assert collection.item("map")["metadata"]["image_urls"]["thumbnail"] == (
+        f"{SERVICE}/full/!400,400/0/default.jpg"
+    )
+    assert "image_urls" not in collection.item("photo")["metadata"]
 
 
 def column(name):

@@ -13,6 +13,7 @@ import torch
 from ..core.config import settings
 from .catalog_fields import (
     iiif_info_from,
+    image_urls,
     object_id_from,
     servable_model,
     source_url_from,
@@ -269,6 +270,9 @@ class CollectionService:
             iiif = iiif_info_from(catalog)
             if iiif:
                 metadata["iiif"] = iiif
+        urls = image_urls(metadata)
+        if urls:
+            metadata["image_urls"] = urls
         object_id = self.object_ids[index]
         if object_id in self.object_model:
             metadata.setdefault(
