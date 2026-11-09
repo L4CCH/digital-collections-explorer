@@ -407,14 +407,18 @@ function ItemDetail({ id, collection, canGoBack }) {
                 <dd>{metadata.width.toLocaleString()} × {metadata.height.toLocaleString()} px</dd>
               </>
             )}
-            <dt>File</dt>
-            <dd>
-              {isPage && metadata.document ? (
-                <a href={documentUrl(current.id, metadata.page)} target="_blank" rel="noopener noreferrer">
-                  {metadata.file_name}
-                </a>
-              ) : showModel ? model.file_name : metadata.file_name}
-            </dd>
+            {(showModel ? model.file_name : metadata.file_name) && (
+              <>
+                <dt>File</dt>
+                <dd>
+                  {isPage && metadata.document ? (
+                    <a href={documentUrl(current.id, metadata.page)} target="_blank" rel="noopener noreferrer">
+                      {metadata.file_name}
+                    </a>
+                  ) : showModel ? model.file_name : metadata.file_name}
+                </dd>
+              </>
+            )}
           </dl>
 
           {license && (
