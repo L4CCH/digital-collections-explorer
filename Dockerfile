@@ -34,6 +34,9 @@ ENV DCE_DATA_DIR=/data \
     HF_HOME=/app/.cache/huggingface \
     PYTHONUNBUFFERED=1
 
+# 0 stops OpenSSL from detecting CPU features, which crashes it on Apple M4 Macs.
+ENV OPENSSL_armcap=0
+
 ARG PRELOAD_MODEL=true
 COPY config.json docker/preload_model.py /tmp/preload/
 RUN if [ "$PRELOAD_MODEL" = "true" ]; then \
