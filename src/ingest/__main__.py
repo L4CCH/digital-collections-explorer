@@ -15,7 +15,7 @@ from src.profiling.sources import open_source
 
 from .documents import INSTALL_HINT, can_read_pdfs
 from .export import export_for_backend
-from .pipeline import Options, clock, make_item_id, run
+from .pipeline import IMAGE_MODES, Options, clock, make_item_id, run
 from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
 
@@ -97,6 +97,14 @@ def parse_args() -> argparse.Namespace:
         help="cap on image bytes held in memory at once",
     )
     parser.add_argument(
+        "--images",
+        choices=IMAGE_MODES,
+        default="copy",
+        help="what the site keeps of images their source can also show: copies "
+        "(default), thumbnails only, or nothing (link), for rows that name an "
+        "IIIF service or a web address",
+    )
+    parser.add_argument(
         "--retry-failed",
         action="store_true",
         help="try failed and skipped images again",
@@ -134,6 +142,7 @@ def summary(state: IngestState, embeddings_dir: Path, data_dir: str | None) -> d
         "pending": counts.get("pending", 0),
         "skipped": counts.get("skipped", 0),
         "failed": counts.get("failed", 0),
+        "images": state.fact("images") or "copy",
         "disk_bytes_measured": measured_disk_bytes(embeddings_dir),
         "run": run_report(state),
         "problems": [
@@ -247,6 +256,7 @@ def main() -> int:
         service = create_embedding_service()
         state.remember("device", str(service.device))
         state.remember("machine_type", cloud_machine_type() or "")
+        state.remember("images", args.images)
         if args.estimated_seconds:
             state.remember("estimated_seconds", str(args.estimated_seconds))
         print(f"Model: {service.model_name} on {service.device}")
@@ -263,6 +273,7 @@ def main() -> int:
             batch_size=args.batch_size,
             max_file_bytes=int(args.max_file_mb * 1024**2),
             max_inflight_bytes=int(args.max_inflight_mb * 1024**2),
+            images=args.images,
         )
         try:
             stats, budget = run(source, pending, service, state, options)

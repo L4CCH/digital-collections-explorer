@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import unquote, urlparse
 
+from src.backend.core.catalog_keys import IIIF_KEYS
+from src.backend.services.catalog_fields import iiif_info_from
+
 IMAGE_EXTS = {
     "jpg",
     "jpeg",
@@ -21,6 +24,7 @@ IMAGE_EXTS = {
     "heif",
     "avif",
 }
+BROWSER_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "avif"}
 DOCUMENT_EXTS = {"pdf"}
 MODEL_EXTS = {"glb", "gltf"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini", ".picasa.ini"}
@@ -37,6 +41,7 @@ PROBE_FILES = 6
 PROBE_CONCURRENCY = 8
 S3_POOL_SIZE = 32
 HTTP_TIMEOUT_SECONDS = 30
+USER_AGENT = "digital-collections-explorer (https://github.com/L4CCH/digital-collections-explorer)"
 
 
 @dataclass
@@ -78,6 +83,21 @@ def is_parquet(uri: str) -> bool:
     return path.lower().endswith(".parquet")
 
 
+def fetch_web(url: str, limit: int | None = None) -> tuple[bytes, str] | None:
+    """The body and content type found at a web address, or None if it cannot be read"""
+    import urllib.request
+
+    headers = {"User-Agent": USER_AGENT}
+    if limit:
+        headers["Range"] = f"bytes=0-{limit - 1}"
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            return response.read(), (response.headers.get("Content-Type") or "").lower()
+    except Exception:
+        return None
+
+
 def s3_client(anonymous: bool, region: str):
     import boto3
     from botocore import UNSIGNED
@@ -111,6 +131,10 @@ class Source:
     def local_address(self, value: str) -> str:
         """Where a file the catalog names by path is on this machine"""
         return value
+
+    def web_image_address(self, ref: FileRef) -> str | None:
+        """The web address of the image itself, when browsers can show it from there"""
+        return None
 
     def catalog_rows(self) -> tuple[list[str], list[tuple]] | None:
         return None
@@ -239,9 +263,12 @@ class ParquetManifestSource(Source):
             ).fetchall()
         ]
         self.url_column = url_column or self._guess(URL_COLUMN_GUESSES)
+        self.iiif_column = self._guess(IIIF_KEYS)
         self.size_column = size_column or self._guess(SIZE_COLUMN_GUESSES)
-        if not self.url_column:
-            raise ValueError(f"No URL column found in {path}. Columns: {self.columns}")
+        if not self.url_column and not self.iiif_column:
+            raise ValueError(
+                f"No URL or IIIF column found in {path}. Columns: {self.columns}"
+            )
         self.s3 = None
         self.s3_bucket = None
         if fetch_via and fetch_via.startswith("s3://"):
@@ -287,18 +314,26 @@ class ParquetManifestSource(Source):
             "uri": self.path,
             "credentials_required": False,
             "url_column": self.url_column,
+            "iiif_column": self.iiif_column,
             "size_column": self.size_column,
             "fetch_via": f"s3://{self.s3_bucket}" if self.s3_bucket else None,
         }
 
+    def _address(self, row: dict) -> str:
+        if self.url_column:
+            return str(row[self.url_column])
+        info = iiif_info_from({self.iiif_column: row[self.iiif_column]}) or ""
+        return f"{info.removesuffix('/info.json')}/full/max/0/default.jpg"
+
     def iter_files(self):
-        url_index = self.columns.index(self.url_column)
         size_index = self.columns.index(self.size_column) if self.size_column else None
-        for row in self._load():
-            url = str(row[url_index])
+        for values in self._load():
+            row = dict(zip(self.columns, values))
+            url = self._address(row)
             key = unquote(urlparse(url).path).lstrip("/") if "://" in url else url
-            size = int(row[size_index] or 0) if size_index is not None else 0
-            yield classify(key, size, {"url": url, "row": dict(zip(self.columns, row))})
+            size = int(values[size_index] or 0) if size_index is not None else 0
+            extra = {"url": url, "row": row, "named_by_service": not self.url_column}
+            yield classify(key, size, extra)
 
     def read_bytes(self, ref, limit=None):
         if self.s3 is not None:
@@ -330,20 +365,12 @@ class ParquetManifestSource(Source):
             return None
 
     def _read_http(self, url: str, limit: int | None) -> bytes | None:
-        import urllib.request
-
         if "://" not in url:
             return None
-        headers = {"Range": f"bytes=0-{limit - 1}"} if limit else {}
-        try:
-            request = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(
-                request, timeout=HTTP_TIMEOUT_SECONDS
-            ) as response:
-                content_type = (response.headers.get("Content-Type") or "").lower()
-                data = response.read()
-        except Exception:
+        fetched = fetch_web(url, limit)
+        if fetched is None:
             return None
+        data, content_type = fetched
         is_image = content_type.startswith("image/") or data[:3] in (
             JPEG_MAGIC,
             PNG_MAGIC,
@@ -351,7 +378,8 @@ class ParquetManifestSource(Source):
         if not is_image:
             returned = content_type.split(";")[0] or "an unknown type"
             self.fetch_note = (
-                f"The '{self.url_column}' column returns {returned}, not image data. "
+                f"The '{self.url_column or self.iiif_column}' column returns {returned}, "
+                f"not image data. "
                 f"It points to web pages rather than files. "
                 f"Use --fetch-via to tell us where the files live."
             )
@@ -366,6 +394,12 @@ class ParquetManifestSource(Source):
 
     def local_address(self, value):
         return self._local_file(value) or value
+
+    def web_image_address(self, ref):
+        url = ref.extra.get("url", "")
+        if self.s3 is not None or not url.startswith(("http://", "https://")):
+            return None
+        return url if ref.ext in BROWSER_IMAGE_EXTS else None
 
     def catalog_rows(self):
         return self.columns, self._load()

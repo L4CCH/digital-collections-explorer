@@ -8,7 +8,7 @@ from collections import Counter, defaultdict
 
 from PIL import Image, ImageFile
 
-from src.backend.core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS
+from src.backend.core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS, THUMBNAIL_KEYS
 
 from .models import (
     Capabilities,
@@ -82,6 +82,8 @@ IN_REGION_BYTES_PER_SECOND = 100 * 1024 * 1024
 CATALOG_EXTS = {"csv", "tsv", "xlsx", "xls", "json", "xml", "parquet"}
 MIN_CATALOG_BYTES = {"xlsx": 2048, "xls": 2048, "parquet": 256}
 MIN_TEXT_CATALOG_BYTES = 64
+# Rows checked for an image address browsers can load: a manifest uses one kind throughout.
+WEB_IMAGE_SAMPLE = 50
 MAX_CATALOG_CANDIDATES = 10
 
 TINY_IMAGE_BYTES = 10_240
@@ -680,7 +682,42 @@ def estimate_sizing(stats: ScanStats, bandwidth_bps: float, model_type: str) -> 
     )
 
 
-def build_decisions(stats: ScanStats, structure: Structure) -> list[Decision]:
+def image_decision(fields: list[FieldProfile], web_images: bool) -> Decision | None:
+    """Ask where the site shows images from, when their source can show them too"""
+    columns = {field.name.lower() for field in fields}
+    has_service = bool(columns & set(IIIF_KEYS))
+    if not (has_service or web_images or columns & set(THUMBNAIL_KEYS)):
+        return None
+    return Decision(
+        id="images",
+        question="The images can also be shown from where they are kept. "
+        "What should the site keep of them?",
+        options=[
+            {"id": "copy", "label": "Its own copies of every image"},
+            {
+                "id": "thumbnails",
+                "label": "Small previews only, with larger views from the source",
+            },
+            {"id": "link", "label": "Nothing, every image shown from the source"},
+        ],
+        recommended="thumbnails" if has_service else "copy",
+        why=(
+            "An IIIF image server sends any size it is asked for. Small previews keep "
+            "the search page quick and take little space, and the full view and zoom "
+            "come from the server."
+            if has_service
+            else "Copies keep the site working if the source is slow, moves its files "
+            "or does not let other sites show them."
+        ),
+    )
+
+
+def build_decisions(
+    stats: ScanStats,
+    structure: Structure,
+    fields: list[FieldProfile] | None = None,
+    web_images: bool = False,
+) -> list[Decision]:
     decisions = []
     if structure.orphan_items:
         decisions.append(
@@ -723,6 +760,9 @@ def build_decisions(stats: ScanStats, structure: Structure) -> list[Decision]:
             "Starting locally is safe and can be changed later.",
         )
     )
+    images = image_decision(fields or [], web_images)
+    if images:
+        decisions.append(images)
     return decisions
 
 
@@ -757,6 +797,11 @@ def profile_collection(
         structure=structure,
         capabilities=build_capabilities(fields),
         sizing=estimate_sizing(stats, deep["bandwidth_bps"], model_type),
-        decisions=build_decisions(stats, structure),
+        decisions=build_decisions(
+            stats,
+            structure,
+            fields,
+            any(source.web_image_address(ref) for ref in images[:WEB_IMAGE_SAMPLE]),
+        ),
         media=media_needed(stats, fields),
     )
