@@ -14,6 +14,8 @@ MODEL_EXTENSIONS = (".glb", ".gltf")
 
 VIEW_ORBIT_KEY = "view_orbit"
 
+IIIF_KEYS_SET = set(IIIF_KEYS)
+
 IIIF_IMAGE_REQUEST = re.compile(
     r"/(full|square|pct:[^/]+|\d+,\d+,\d+,\d+)/[^/]+/!?\d+(\.\d+)?"
     r"/(default|color|colour|gray|grey|bitonal|native)\.\w+$",
@@ -104,6 +106,19 @@ def image_source(metadata: Dict[str, Any], size: str) -> Optional[str]:
     else:
         kept = (paths.get("processed"), from_service("full"))
     return next((place for place in kept if place), None)
+
+
+def origin_of(address: str) -> str:
+    return "/".join(address.split("/", 3)[:3])
+
+
+def image_hosts(metadata: Dict[str, Any]) -> set:
+    """The servers other than this site that a browser loads this image from"""
+    paths = metadata.get("paths") or {}
+    kept = [paths.get("thumbnail"), paths.get("processed"), metadata.get("iiif")]
+    if not metadata.get("iiif") and IIIF_KEYS_SET & set(metadata.get("catalog") or {}):
+        kept.append(iiif_info_from(metadata.get("catalog")))
+    return {origin_of(place) for place in kept if is_web_address(place)}
 
 
 def image_urls(metadata: Dict[str, Any]) -> Dict[str, str]:

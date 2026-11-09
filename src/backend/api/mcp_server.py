@@ -61,26 +61,45 @@ WALL = "ui://dce/wall.html"
 SHOWN_ON_THE_WALL = {"ui": {"resourceUri": WALL}}
 
 
+def wall_domains(image_hosts: List[str]) -> Optional[ResourceCsp]:
+    """Where the wall may load pictures from: this site and the servers that keep them"""
+    site = urlsplit(settings.public_url)
+    origin = [f"{site.scheme}://{site.netloc}"] if site.netloc else []
+    domains = sorted(set(origin + image_hosts))
+    return ResourceCsp(resource_domains=domains) if domains else None
+
+
 def image_wall() -> Apps:
     """The image wall that hosts supporting MCP Apps show for a list of results"""
     apps = Apps()
-    site = urlsplit(settings.public_url)
-    origin = f"{site.scheme}://{site.netloc}" if site.netloc else None
     apps.add_html_resource(
         WALL,
         (Path(__file__).parent / "mcp_wall.html").read_text(),
         title="Image wall",
-        csp=ResourceCsp(resource_domains=[origin]) if origin else None,
+        csp=wall_domains([]),
     )
     return apps
 
+
+wall_app = image_wall()
 
 server = MCPServer(
     name="digital-collections-explorer",
     title="Digital Collections Explorer",
     instructions=INSTRUCTIONS,
-    extensions=[image_wall()],
+    extensions=[wall_app],
 )
+
+
+def allow_images_from(image_hosts: List[str]) -> None:
+    """Let the wall show pictures kept by other servers, once the collection is loaded"""
+    csp = wall_domains(image_hosts)
+    for binding in wall_app.resources():
+        ui = {**((binding.resource.meta or {}).get("ui") or {})}
+        ui.pop("csp", None)
+        if csp:
+            ui["csp"] = csp.model_dump(by_alias=True, exclude_none=True)
+        binding.resource.meta = {"ui": ui} if ui else None
 
 
 class Found(BaseModel):
@@ -271,7 +290,8 @@ def found(
         similarity=None if similarity is None else round(float(similarity), 3),
         matched_fields=provenance.get("fields") or [],
         page=f"{site}/#/item/{quote(image_id, safe='')}",
-        thumbnail=f"{site}/images/{quote(image_id, safe='')}?size=thumbnail",
+        thumbnail=(metadata.get("image_urls") or {}).get("thumbnail")
+        or f"{site}/images/{quote(image_id, safe='')}?size=thumbnail",
     )
 
 

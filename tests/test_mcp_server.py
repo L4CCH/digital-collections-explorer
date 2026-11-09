@@ -91,6 +91,42 @@ def test_the_wall_may_load_pictures_only_from_the_sites_own_address(monkeypatch)
     assert allowed() is None
 
 
+def test_the_wall_may_also_load_pictures_from_the_servers_that_keep_them(
+    monkeypatch,
+):
+    from src.backend.api import mcp_server
+    from src.backend.core.config import settings
+
+    def allowed():
+        (binding,) = mcp_server.wall_app.resources()
+        return ((binding.resource.meta or {}).get("ui") or {}).get("csp")
+
+    monkeypatch.setattr(settings, "public_url", "https://collection.example.org/maps")
+    try:
+        mcp_server.allow_images_from(["https://tile.loc.gov"])
+        assert allowed() == {
+            "resourceDomains": [
+                "https://collection.example.org",
+                "https://tile.loc.gov",
+            ]
+        }
+        monkeypatch.setattr(settings, "public_url", "")
+        mcp_server.allow_images_from([])
+        assert allowed() is None
+    finally:
+        mcp_server.allow_images_from([])
+
+
+def test_a_result_kept_elsewhere_shows_its_thumbnail_from_there():
+    from src.backend.api import mcp_server
+
+    address = "https://tile.loc.gov/iiif/a/full/!400,400/0/default.jpg"
+    result = {"id": "a", "metadata": {"image_urls": {"thumbnail": address}}}
+    assert mcp_server.found(result, {}, "https://site.org").thumbnail == address
+    plain = mcp_server.found({"id": "b", "metadata": {}}, {}, "https://site.org")
+    assert plain.thumbnail == "https://site.org/images/b?size=thumbnail"
+
+
 def test_the_collection_is_described_with_its_groups():
     summary = call("describe_collection").structured_content
     assert [(g["id"], g["label"]) for g in summary["groups"]] == [
@@ -292,3 +328,18 @@ def test_the_endpoint_refuses_requests_over_four_megabytes():
 
     answer = anyio.run(run, Starlette(routes=mcp_server.http_routes()))
     assert answer.status_code == 413
+
+
+def test_the_servers_that_keep_an_image_are_known():
+    from src.backend.services.catalog_fields import image_hosts
+
+    assert image_hosts(
+        {
+            "paths": {"thumbnail": "thumbnails/a.jpg"},
+            "iiif": "https://tile.loc.gov/iiif/a/info.json",
+        }
+    ) == {"https://tile.loc.gov"}
+    assert image_hosts({"catalog": {"iiif_url": "https://iiif.example.org/b"}}) == {
+        "https://iiif.example.org"
+    }
+    assert image_hosts({"paths": {"thumbnail": "thumbnails/a.jpg"}}) == set()
