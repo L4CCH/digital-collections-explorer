@@ -1,7 +1,8 @@
 """
 Fetch the title and date of every Library of Congress item that `input/merged_files.csv` lists,
 for `create_loc_assets.py` to show on each map's page. Reads the loc.gov JSON API, slowly enough
-to stay within its published limits, and writes `input/loc_titles.json`.
+to stay within its published limits, and writes `input/loc_titles.json`, where an item
+loc.gov no longer has is null.
 """
 
 import http.client
@@ -31,15 +32,17 @@ ITEM_PAUSE_SECONDS = 3
 BLOCKED_WAIT_SECONDS = 15 * 60
 
 
-def get_json(url: str, attempts: int = 5) -> dict:
+def get_json(url: str, attempts: int = 5) -> dict | None:
     for attempt in range(attempts):
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
                 return json.load(response)
         except (OSError, http.client.HTTPException, json.JSONDecodeError) as error:
-            blocked = isinstance(error, urllib.error.HTTPError) and error.code == 429
-            wait = BLOCKED_WAIT_SECONDS if blocked else 60 * (attempt + 1)
+            code = error.code if isinstance(error, urllib.error.HTTPError) else None
+            if code == 404:
+                return None
+            wait = BLOCKED_WAIT_SECONDS if code == 429 else 60 * (attempt + 1)
             print(f"{url}: {error}; trying again in {wait} seconds")
             time.sleep(wait)
     raise RuntimeError(f"Could not read {url}")
@@ -102,7 +105,8 @@ def fetch_titles():
     for number, key in enumerate(missing, 1):
         if key not in items:
             address = ITEM_URL.format(item=key.replace("http://", "https://", 1))
-            items[key] = described(get_json(address).get("item") or {})
+            data = get_json(address)
+            items[key] = None if data is None else described(data.get("item") or {})
             time.sleep(ITEM_PAUSE_SECONDS)
         if number % 100 == 0 or number == len(missing):
             with open(ITEMS_PATH, "w") as f:
@@ -112,8 +116,12 @@ def fetch_titles():
 
     with open(TITLES_PATH, "w") as f:
         json.dump(found, f, indent=1, ensure_ascii=False)
-    titled = sum(1 for value in found.values() if value.get("title"))
-    print(f"Saved {TITLES_PATH}: {titled} of {len(wanted)} items have a title")
+    titled = sum(1 for value in found.values() if value and value.get("title"))
+    gone = sum(1 for value in found.values() if value is None)
+    print(
+        f"Saved {TITLES_PATH}: {titled} of {len(wanted)} items have a title,"
+        f" {gone} are no longer at loc.gov"
+    )
 
 
 if __name__ == "__main__":

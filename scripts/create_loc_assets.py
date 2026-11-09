@@ -79,11 +79,12 @@ def generate_assets():
             "iiif": f"{url_base}/info.json",
             "paths": paths,
         }
-        if isinstance(p1_item_id, str) and p1_item_id.startswith("http"):
+        record = titles.get(p1_item_id, {})
+        if isinstance(p1_item_id, str) and p1_item_id.startswith("http") and record is not None:
             final_metadata[b64_key]["source_url"] = p1_item_id.replace(
                 "http://", "https://", 1
             )
-            final_metadata[b64_key].update(titles.get(p1_item_id, {}))
+            final_metadata[b64_key].update(record)
 
     # --- 4. Final Save and Validation ---
     with open(FINAL_METADATA_PATH, "w") as f:
