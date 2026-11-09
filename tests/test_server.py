@@ -53,3 +53,24 @@ def test_images_may_be_kept_by_browsers_and_a_cdn(backend, monkeypatch, tmp_path
     )
     response = asyncio.run(images.get_image_by_id("a", size="full"))
     assert response.headers["cache-control"] == "public, max-age=86400"
+
+
+def test_an_image_kept_on_an_iiif_server_is_loaded_from_there(backend, monkeypatch):
+    from src.backend.api.routes import images
+
+    service = "https://tile.loc.gov/image-services/iiif/service:gmd:a"
+    document = {
+        "metadata": {
+            "paths": {
+                "processed": f"{service}/full/2000,/0/default.jpg",
+                "thumbnail": f"{service}/full/400,/0/default.jpg",
+            }
+        }
+    }
+    monkeypatch.setattr(
+        images.embedding_service, "get_document_by_id", lambda item_id: document
+    )
+    response = asyncio.run(images.get_image_by_id("a", size="thumbnail"))
+    assert response.status_code == 307
+    assert response.headers["location"] == f"{service}/full/400,/0/default.jpg"
+    assert response.headers["cache-control"] == "public, max-age=86400"
