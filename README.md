@@ -45,7 +45,7 @@ The site's interface lives in `src/frontend/default`. Another frontend can take 
 
 ## Other Ways to Start
 
-With an AI coding agent such as Claude Code, Codex, Gemini CLI or Cursor, ask it to make your collection searchable. The `dce-setup` skill in `skills/` walks it through profiling, indexing and serving.
+With an AI coding agent such as Claude Code, Codex, Gemini CLI or Cursor, ask it to make your collection searchable. The `dce-setup` skill walks it through profiling, indexing and serving, and agents started in this repository find it on their own.
 
 With Docker, one command builds the index and another serves it. The image runs on x86-64 and ARM machines, Apple Silicon and AWS Graviton among them. The published image shows every kind of material; an image of your own built with `docker build --build-arg MEDIA=pdf .` holds only what you list.
 
