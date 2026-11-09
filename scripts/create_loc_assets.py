@@ -80,7 +80,11 @@ def generate_assets():
             "paths": paths,
         }
         record = titles.get(p1_item_id, {})
-        if isinstance(p1_item_id, str) and p1_item_id.startswith("http") and record is not None:
+        if (
+            isinstance(p1_item_id, str)
+            and p1_item_id.startswith("http")
+            and record is not None
+        ):
             final_metadata[b64_key]["source_url"] = p1_item_id.replace(
                 "http://", "https://", 1
             )
