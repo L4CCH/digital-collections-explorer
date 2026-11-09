@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import os
 import queue
 import sys
@@ -14,15 +15,17 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFile
 
+from src.backend.core.catalog_keys import THUMBNAIL_KEYS
 from src.backend.services.catalog_fields import (
     iiif_info_from,
+    is_web_address,
     model_url_from,
     object_id_from,
     servable_model,
     source_url_from,
     view_orbit_from,
 )
-from src.profiling.sources import FileRef, Source
+from src.profiling.sources import FileRef, Source, fetch_web
 
 from .documents import Pdf, page_key
 from .state import IngestState, Result
@@ -49,6 +52,8 @@ WRITER_SHUTDOWN_SECONDS = 10
 MAX_ERROR_LENGTH = 500
 SHARD_PREFIX_LENGTH = 2
 
+IMAGE_MODES = ("copy", "thumbnails", "link")
+
 
 @dataclass
 class Options:
@@ -60,6 +65,16 @@ class Options:
     batch_size: int = 32
     max_file_bytes: int = 200 * 1024 * 1024
     max_inflight_bytes: int = 2 * 1024**3
+    images: str = "copy"
+
+
+@dataclass
+class Origin:
+    """What a row's source can show of its image without this site's copies"""
+
+    service: str | None = None
+    thumbnail: str | None = None
+    image: str | None = None
 
 
 @dataclass
@@ -73,6 +88,8 @@ class Item:
     metadata: dict = field(default_factory=dict)
     page_key: str | None = None
     document: Document | None = None
+    origin: Origin = field(default_factory=Origin)
+    original_size: tuple[int, int] | None = None
 
 
 @dataclass
@@ -202,8 +219,41 @@ def save_resized(image: Image.Image, edge: int, quality: int, path: Path) -> Non
     image.save(path, "JPEG", quality=quality)
 
 
+def origin_of(source: Source, ref: FileRef) -> Origin:
+    row = ref.extra.get("row") or {}
+    info = iiif_info_from(row)
+    thumbnails = (str(row.get(key) or "").strip() for key in THUMBNAIL_KEYS)
+    return Origin(
+        service=info.removesuffix("/info.json") if info else None,
+        thumbnail=next((value for value in thumbnails if is_web_address(value)), None),
+        image=source.web_image_address(ref),
+    )
+
+
+def iiif_size(service: str) -> tuple[int, int] | None:
+    fetched = fetch_web(f"{service}/info.json")
+    try:
+        info = json.loads(fetched[0])
+        return int(info["width"]), int(info["height"])
+    except Exception:
+        return None
+
+
+def read_image(source: Source, options: Options, item: Item) -> bytes | None:
+    """The image, asked of its IIIF service at the size this mode needs when there is one"""
+    service = item.origin.service
+    if service:
+        edge = PROCESSED_EDGE if options.images == "copy" else MODEL_INPUT_EDGE
+        fetched = fetch_web(f"{service}/full/!{edge},{edge}/0/default.jpg")
+        if fetched and fetched[1].startswith("image/"):
+            item.original_size = iiif_size(service)
+            return fetched[0]
+    return source.read_bytes(item.ref)
+
+
 def download_worker(
     source: Source,
+    options: Options,
     inbox: queue.Queue,
     outbox: queue.Queue,
     results: queue.Queue,
@@ -217,7 +267,7 @@ def download_worker(
         item.started = time.time()
         item.reserved = budget.acquire(item.ref.size + RESERVE_PADDING_BYTES)
         try:
-            item.blob = source.read_bytes(item.ref)
+            item.blob = read_image(source, options, item)
             if item.blob is None:
                 raise IOError("the file could not be read from the source")
             with stats.lock:
@@ -267,6 +317,36 @@ def keep_copies(image: Image.Image, key: str, options: Options) -> dict:
     }
 
 
+def keep_images(image: Image.Image, item: Item, options: Options) -> dict:
+    """The copies this mode keeps, and the addresses of what the source shows instead"""
+    origin, key = item.origin, item.ref.key
+    paths = {}
+    if options.images != "link" or not (origin.thumbnail or origin.service):
+        thumbnail_path = sharded_path(options.thumbnails_dir, key)
+        save_resized(image, THUMBNAIL_EDGE, THUMBNAIL_QUALITY, thumbnail_path)
+        paths["thumbnail"] = stored_path(thumbnail_path, options.data_dir)
+    elif origin.thumbnail:
+        paths["thumbnail"] = origin.thumbnail
+    if options.images == "copy" or not (origin.service or origin.image):
+        processed_path = sharded_path(options.processed_dir, key)
+        save_resized(image, PROCESSED_EDGE, PROCESSED_QUALITY, processed_path)
+        paths["processed"] = stored_path(processed_path, options.data_dir)
+    elif not origin.service:
+        paths["processed"] = origin.image
+    return paths
+
+
+def original_of(source: Source, item: Item, paths: dict) -> str:
+    original = source.original_uri(item.ref)
+    if os.path.exists(original):
+        return original
+    processed = paths.get("processed")
+    if processed and not is_web_address(processed):
+        return processed
+    origin = item.origin
+    return origin.image or f"{origin.service}/full/max/0/default.jpg"
+
+
 def model_input(image: Image.Image) -> Image.Image:
     image.thumbnail((MODEL_INPUT_EDGE, MODEL_INPUT_EDGE), Image.Resampling.LANCZOS)
     return image
@@ -274,7 +354,7 @@ def model_input(image: Image.Image) -> Image.Image:
 
 def decode_image(source: Source, options: Options, item: Item) -> None:
     image = Image.open(io.BytesIO(item.blob))
-    width, height = image.size
+    width, height = item.original_size or image.size
     image.draft("RGB", (PROCESSED_EDGE, PROCESSED_EDGE))
     if image.mode != "RGB":
         image = image.convert("RGB")
@@ -282,19 +362,17 @@ def decode_image(source: Source, options: Options, item: Item) -> None:
 
     if max(image.size) > PROCESSED_EDGE:
         image.thumbnail((PROCESSED_EDGE, PROCESSED_EDGE), Image.Resampling.LANCZOS)
-    copies = keep_copies(image, item.ref.key, options)
+    paths = keep_images(image, item, options)
 
-    original = source.original_uri(item.ref)
     item.metadata = {
-        "file_name": item.ref.basename,
+        "file_name": (
+            None if item.ref.extra.get("named_by_service") else item.ref.basename
+        ),
         "type": "image",
         "width": width,
         "height": height,
-        "source_uri": original,
-        "paths": {
-            "original": original if os.path.exists(original) else copies["processed"],
-            **copies,
-        },
+        "source_uri": source.original_uri(item.ref),
+        "paths": {"original": original_of(source, item, paths), **paths},
         **catalog_metadata(item.ref.extra.get("row"), source),
     }
     item.image = model_input(image)
@@ -521,7 +599,16 @@ def run(
 
     writer = start(write_worker, state, results, stats, stop)
     downloaders = [
-        start(download_worker, source, to_download, to_decode, results, budget, stats)
+        start(
+            download_worker,
+            source,
+            options,
+            to_download,
+            to_decode,
+            results,
+            budget,
+            stats,
+        )
         for _ in range(options.download_workers)
     ]
     decoders = [
@@ -534,7 +621,8 @@ def run(
     try:
         for ref in refs:
             item = Item(ref=ref, item_id=make_item_id(ref.key))
-            if ref.size > options.max_file_bytes:
+            item.origin = origin_of(source, ref)
+            if ref.size > options.max_file_bytes and not item.origin.service:
                 limit_mb = options.max_file_bytes / 1024**2
                 results.put(
                     Result(

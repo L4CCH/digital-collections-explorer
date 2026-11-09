@@ -2,7 +2,7 @@ import React from 'react';
 import CatalogText from './CatalogText';
 import CubeIcon from './CubeIcon';
 import { itemHref } from '../hooks/useHashRoute';
-import { imageUrl } from '../services/api';
+import { imageSrc } from '../services/api';
 import { plainText } from '../services/catalogText';
 import { titleOf } from '../services/items';
 import { viewer } from '../services/viewers';
@@ -51,7 +51,7 @@ const ImageGrid = React.memo(({ items, size = 'regular', groupLabels = {} }) => 
       return (
         <li key={item.id} className="image-grid-cell" style={{ '--ratio': aspectRatioOf(item) }}>
           <a href={itemHref(item.id)} aria-label={name || unnamed}>
-            <img src={imageUrl(item.id, 'thumbnail')} alt={name || ''} loading="lazy" />
+            <img src={imageSrc(item, 'thumbnail')} alt={name || ''} loading="lazy" />
             <span className="image-grid-caption">
               {title ? <CatalogText text={title} /> : name || unnamed}
               {groupLabel && <span className="image-grid-group">{groupLabel}</span>}

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
 
 from src.backend.core.config import settings
+from src.backend.services.catalog_fields import image_source, is_web_address
 from src.backend.services.collection_store import METADATA_DB, related_thumbnail
 from src.backend.services.embedding_service import embedding_service
 
@@ -38,25 +39,15 @@ async def get_image_by_id(
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document with ID {id} not found")
 
-    if (
-        size == "thumbnail"
-        and "metadata" in doc
-        and "paths" in doc["metadata"]
-        and "thumbnail" in doc["metadata"]["paths"]
-    ):
-        path_str = doc["metadata"]["paths"]["thumbnail"]
-    elif (
-        "metadata" in doc
-        and "paths" in doc["metadata"]
-        and "processed" in doc["metadata"]["paths"]
-    ):
-        path_str = doc["metadata"]["paths"]["processed"]
-    else:
+    path_str = image_source(
+        doc.get("metadata") or {}, "thumbnail" if size == "thumbnail" else "full"
+    )
+    if not path_str:
         raise HTTPException(
             status_code=404, detail="Image path not found in document metadata"
         )
 
-    if path_str.startswith(("http://", "https://")):
+    if is_web_address(path_str):
         return RedirectResponse(path_str, headers=CACHE_HEADERS)
 
     path = resolve_path(path_str)

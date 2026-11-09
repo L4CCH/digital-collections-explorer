@@ -115,6 +115,10 @@ export const imageUrl = (id, size = 'full') => (
   `${API_URL}/images/${encodeURIComponent(id)}?size=${size}`
 );
 
+export const imageSrc = (item, size = 'full') => (
+  item.metadata?.image_urls?.[size] || imageUrl(item.id, size)
+);
+
 /**
  * Where the thumbnail of a photo from another source, such as Flickr, is served from
  * @param {string} id - The photo's id in that source, such as flickr:2535935153

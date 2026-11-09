@@ -6,11 +6,12 @@
 Someone built that index another way. Use a different `--data-dir`. Only pass
 `--overwrite` when the person has explicitly said to replace that index.
 
-## "was built with ..., but config.json is set to ..."
+## "was built with ..." or "was indexed with ..., but config.json is now set to ..."
 
-An index can only be searched, or added to, with the model that built it. This
-appears when `config.json` names a different model from the one the collection
-was indexed with, for example after the project's default model changed.
+An index can only be searched, or added to, with the model that built it. The
+site or `ingest` says so when `config.json` names a different model from the one
+the collection was indexed with, for example after the project's default model
+changed.
 
 Do not edit the index. Either point `config.json` back at the model named in the
 message, or index the collection again into a new `--data-dir` with the current
@@ -31,12 +32,20 @@ collections the realistic options are: run overnight (the run can be resumed),
 index a sample first, or run on a cloud machine in the same region as the data.
 The last option costs money and may conflict with data residency rules, so ask.
 
+## Many images from an IIIF or web server fail to download
+
+The server may limit how fast one machine can ask, and many institutions do,
+or it may no longer have those images: the failures look the same. Open one of
+the failed addresses in a browser. If it still works, wait a while, then run the
+same command with `--retry-failed` and a lower `--download-workers`, such as 4.
+If it does not, the source has dropped those images: report how many.
+
 ## Many images fail with "decode" errors
 
 Check `problems` in the ingest summary. `UnidentifiedImageError` means the file
-is not a real image despite its extension. `Truncated File Read` means the file
-is incomplete. Both are problems in the source data, not in the tool. Report
-the count and a few file names so the person can look into them.
+is not a real image despite its extension, a problem in the source data rather
+than in the tool. Report the count and a few file names so the person can look
+into them. An incomplete file is still indexed, with the missing part gray.
 
 ## Images larger than 200 MB are skipped
 

@@ -71,6 +71,7 @@ async def lifespan(app):
 
     async with AsyncExitStack() as stack:
         if settings.mcp:
+            mcp_server.allow_images_from(collection_service.image_hosts())
             await stack.enter_async_context(mcp_server.server.session_manager.run())
             logger.info("Answering the Model Context Protocol at /mcp")
         yield

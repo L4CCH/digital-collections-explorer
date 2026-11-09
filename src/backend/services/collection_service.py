@@ -13,6 +13,8 @@ import torch
 from ..core.config import settings
 from .catalog_fields import (
     iiif_info_from,
+    image_hosts,
+    image_urls,
     object_id_from,
     servable_model,
     source_url_from,
@@ -249,6 +251,14 @@ class CollectionService:
                 break
         return found
 
+    def image_hosts(self) -> List[str]:
+        """The servers other than this site that show the collection's images"""
+        self._ensure_index()
+        hosts: Set[str] = set()
+        for metadata in (self.embeddings.metadata or {}).values():
+            hosts |= image_hosts(metadata)
+        return sorted(hosts)
+
     def group_summary(self) -> List[Dict[str, Any]]:
         """Each group with how many images and objects it holds"""
         self._ensure_index()
@@ -269,6 +279,9 @@ class CollectionService:
             iiif = iiif_info_from(catalog)
             if iiif:
                 metadata["iiif"] = iiif
+        urls = image_urls(metadata)
+        if urls:
+            metadata["image_urls"] = urls
         object_id = self.object_ids[index]
         if object_id in self.object_model:
             metadata.setdefault(

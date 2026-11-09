@@ -8,7 +8,7 @@ import ImageGrid from './ImageGrid';
 import RelatedSources from './RelatedSources';
 import { itemHref } from '../hooks/useHashRoute';
 import {
-  documentUrl, getItem, getSimilar, getSimilarShape, imageUrl, modelUrl,
+  documentUrl, getItem, getSimilar, getSimilarShape, imageSrc, imageUrl, modelUrl,
 } from '../services/api';
 import { plainText } from '../services/catalogText';
 import { titleOf } from '../services/items';
@@ -23,8 +23,8 @@ const SIMILAR_COUNT = 24;
 // Fields longer than this many characters open folded, so the rest of the record stays in view.
 const FOLDED_LENGTH = 600;
 
-const fullImage = (id) => imageUrl(id, 'full');
-const thumbnail = (id) => imageUrl(id, 'thumbnail');
+const fullImage = (photo) => imageSrc(photo, 'full');
+const thumbnail = (photo) => imageSrc(photo, 'thumbnail');
 
 const hostnameOf = (url) => {
   try {
@@ -159,7 +159,7 @@ function ItemDetail({ id, collection, canGoBack }) {
     [entries[currentIndex - 1], entries[currentIndex + 1]]
       .filter((entry) => entry && !entry.isModel)
       .forEach((photo) => {
-        new Image().src = fullImage(photo.id);
+        new Image().src = fullImage(photo);
       });
   }, [entries, currentIndex]);
 
@@ -255,7 +255,7 @@ function ItemDetail({ id, collection, canGoBack }) {
               <ModelStage
                 src={model.url || modelUrl(model.id)}
                 orbit={viewOrbits.get(viewId)}
-                poster={viewId ? fullImage(viewId) : undefined}
+                poster={viewId ? imageUrl(viewId, 'full') : undefined}
                 alt={name ? `3D model of ${name}` : '3D model'}
               />
             ) : (
@@ -265,7 +265,7 @@ function ItemDetail({ id, collection, canGoBack }) {
                 onClick={() => setZoomIsOpen(true)}
                 aria-label="View larger"
               >
-                <img src={fullImage(current.id)} alt={name || unnamed} />
+                <img src={fullImage(current)} alt={name || unnamed} />
               </button>
             )}
             {hasSeveralEntries && (
@@ -321,11 +321,11 @@ function ItemDetail({ id, collection, canGoBack }) {
                       >
                         {entry.isModel ? (
                           <>
-                            {viewId && <img src={thumbnail(viewId)} alt="" loading="lazy" />}
+                            {viewId && <img src={imageUrl(viewId, 'thumbnail')} alt="" loading="lazy" />}
                             <span className="item-detail-model-mark"><CubeIcon />3D</span>
                           </>
                         ) : (
-                          <img src={thumbnail(entry.id)} alt="" loading="lazy" />
+                          <img src={thumbnail(entry)} alt="" loading="lazy" />
                         )}
                       </a>
                     </li>
@@ -457,7 +457,7 @@ function ItemDetail({ id, collection, canGoBack }) {
         open={zoomIsOpen && !deepZoomInfo}
         close={closeZoom}
         index={stillIndex}
-        slides={stills.map((photo) => ({ src: fullImage(photo.id), alt: name || '' }))}
+        slides={stills.map((photo) => ({ src: fullImage(photo), alt: name || '' }))}
         on={{ view: ({ index }) => stills[index] && showPhoto(stills[index].id) }}
         plugins={[Zoom]}
         carousel={{ finite: true }}
