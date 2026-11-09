@@ -176,6 +176,22 @@ async def llms():
 
 frontend_dir = built_frontend(settings.frontend)
 
+CHECK_EVERY_VISIT = "no-cache"
+# A year: the build names every file in assets/ by its content, so an update never reuses a name.
+KEEP_FOR_A_YEAR = "public, max-age=31536000, immutable"
+
+
+class FrontendFiles(StaticFiles):
+    """The built frontend: files named by their content are kept a year, the rest are checked on every visit"""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        named_by_content = Path(self.get_path(scope)).parts[:1] == ("assets",)
+        response.headers["Cache-Control"] = (
+            KEEP_FOR_A_YEAR if named_by_content else CHECK_EVERY_VISIT
+        )
+        return response
+
 
 @app.get("/", include_in_schema=False)
 @app.get("/index.html", include_in_schema=False)
@@ -184,11 +200,16 @@ async def home():
     if not frontend_dir.exists():
         raise HTTPException(status_code=404, detail="The frontend has not been built")
     index_html = site_pages.read_index(frontend_dir)
-    return HTMLResponse(site_pages.home_page(index_html, collection_description()))
+    return HTMLResponse(
+        site_pages.home_page(index_html, collection_description()),
+        headers={"Cache-Control": CHECK_EVERY_VISIT},
+    )
 
 
 if frontend_dir.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+    app.mount(
+        "/", FrontendFiles(directory=str(frontend_dir), html=True), name="frontend"
+    )
     logger.info(f"Serving frontend from {frontend_dir}")
 else:
     logger.warning(f"Frontend directory not found at {frontend_dir}")

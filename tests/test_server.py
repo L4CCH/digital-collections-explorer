@@ -74,3 +74,29 @@ def test_an_image_kept_on_an_iiif_server_is_loaded_from_there(backend, monkeypat
     assert response.status_code == 307
     assert response.headers["location"] == f"{service}/full/400,/0/default.jpg"
     assert response.headers["cache-control"] == "public, max-age=86400"
+
+
+def test_frontend_files_named_by_content_are_kept_and_the_rest_checked(
+    backend, tmp_path
+):
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-D3ChR7sy.js").write_text("app")
+    (tmp_path / "decoders").mkdir()
+    (tmp_path / "decoders" / "draco.wasm").write_bytes(b"wasm")
+    (tmp_path / "index.html").write_text("<html></html>")
+    site = Starlette()
+    site.mount("/", backend.FrontendFiles(directory=str(tmp_path), html=True))
+    client = TestClient(site)
+
+    script = client.get("/assets/index-D3ChR7sy.js")
+    assert script.headers["cache-control"] == "public, max-age=31536000, immutable"
+    decoder = client.get("/decoders/draco.wasm")
+    assert decoder.headers["cache-control"] == "no-cache"
+    unchanged = client.get(
+        "/decoders/draco.wasm", headers={"if-none-match": decoder.headers["etag"]}
+    )
+    assert unchanged.status_code == 304
+    assert client.head("/").headers["cache-control"] == "no-cache"
