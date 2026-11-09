@@ -43,16 +43,17 @@ const ImageGrid = React.memo(({ items, size = 'regular', groupLabels = {} }) => 
       const title = titleOf(item);
       const isPage = Boolean(item.metadata?.pages);
       const name = plainText(title) || (isPage ? item.metadata.file_name : '');
+      const unnamed = item.metadata?.source_url ? 'Untitled' : 'Uncataloged image';
       const photoCount = item.image_count || 1;
       const hasModel = SHOWS_MODELS && Boolean(item.metadata?.model_url);
       const groupLabel = groupLabels[item.metadata?.group];
 
       return (
         <li key={item.id} className="image-grid-cell" style={{ '--ratio': aspectRatioOf(item) }}>
-          <a href={itemHref(item.id)} aria-label={name || 'Uncataloged image'}>
+          <a href={itemHref(item.id)} aria-label={name || unnamed}>
             <img src={imageUrl(item.id, 'thumbnail')} alt={name || ''} loading="lazy" />
             <span className="image-grid-caption">
-              {title ? <CatalogText text={title} /> : name || 'Uncataloged image'}
+              {title ? <CatalogText text={title} /> : name || unnamed}
               {groupLabel && <span className="image-grid-group">{groupLabel}</span>}
               {item.explanation && <span className="image-grid-why">{item.explanation}</span>}
             </span>

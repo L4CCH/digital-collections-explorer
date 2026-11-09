@@ -224,6 +224,7 @@ function ItemDetail({ id, collection, canGoBack }) {
   const title = titleOf(current);
   const name = plainText(title) || (isPage ? metadata.file_name : '');
   const sourceUrl = metadata.source_url;
+  const unnamed = sourceUrl ? 'Untitled' : 'Uncataloged image';
   const sourceName = collection?.source_name || (sourceUrl && hostnameOf(sourceUrl));
   const license = collection?.license;
   const groupLabel = groupLabels[metadata.group];
@@ -264,7 +265,7 @@ function ItemDetail({ id, collection, canGoBack }) {
                 onClick={() => setZoomIsOpen(true)}
                 aria-label="View larger"
               >
-                <img src={fullImage(current.id)} alt={name || 'Uncataloged image'} />
+                <img src={fullImage(current.id)} alt={name || unnamed} />
               </button>
             )}
             {hasSeveralEntries && (
@@ -336,10 +337,10 @@ function ItemDetail({ id, collection, canGoBack }) {
         </div>
 
         <div className="item-detail-facts">
-          <h2>{title ? <CatalogText text={title} /> : name || 'Uncataloged image'}</h2>
+          <h2>{title ? <CatalogText text={title} /> : name || unnamed}</h2>
           {groupLabel && <p className="item-detail-group">{groupLabel}</p>}
 
-          {!title && (
+          {!title && !sourceUrl && (
             <p className="item-detail-note">
               {isPage
                 ? `This document has no catalog record. It can be found here because the search
@@ -407,14 +408,18 @@ function ItemDetail({ id, collection, canGoBack }) {
                 <dd>{metadata.width.toLocaleString()} × {metadata.height.toLocaleString()} px</dd>
               </>
             )}
-            <dt>File</dt>
-            <dd>
-              {isPage && metadata.document ? (
-                <a href={documentUrl(current.id, metadata.page)} target="_blank" rel="noopener noreferrer">
-                  {metadata.file_name}
-                </a>
-              ) : showModel ? model.file_name : metadata.file_name}
-            </dd>
+            {(showModel ? model.file_name : metadata.file_name) && (
+              <>
+                <dt>File</dt>
+                <dd>
+                  {isPage && metadata.document ? (
+                    <a href={documentUrl(current.id, metadata.page)} target="_blank" rel="noopener noreferrer">
+                      {metadata.file_name}
+                    </a>
+                  ) : showModel ? model.file_name : metadata.file_name}
+                </dd>
+              </>
+            )}
           </dl>
 
           {license && (

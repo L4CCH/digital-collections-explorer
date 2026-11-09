@@ -8,12 +8,14 @@ in the same way as we do in our public demo at https://digital-collections-explo
 
 import base64
 import json
+import os
 
 import pandas as pd
 import torch
 
 ORIGINAL_INDEX_PATH = "input/beto_idx.pt"
 CSV_PATH = "input/merged_files.csv"
+TITLES_PATH = "input/loc_titles.json"
 FINAL_METADATA_PATH = "output/metadata.json"
 FINAL_INDEX_PATH = "output/item_ids.pt"
 
@@ -21,6 +23,10 @@ FINAL_INDEX_PATH = "output/item_ids.pt"
 def generate_assets():
     # --- 1. Load the original beto_idx.pt file ---
     original_idx = torch.load(ORIGINAL_INDEX_PATH)
+    titles = {}
+    if os.path.exists(TITLES_PATH):
+        with open(TITLES_PATH) as f:
+            titles = json.load(f)
     total_items = len(original_idx)
     print(f"Found {total_items} entries in the original index.")
 
@@ -58,7 +64,7 @@ def generate_assets():
         final_beto_idx.append(b64_key)
 
         # d. Find p1_item_id
-        p1_item_id = iiif_to_p1_lookup.get(iiif_id, "p1_item_id_not_found")
+        p1_item_id = iiif_to_p1_lookup.get(iiif_id)
 
         # e. Assemble the new metadata object
         url_base = f"https://tile.loc.gov/image-services/iiif/{iiif_id}"
@@ -70,9 +76,15 @@ def generate_assets():
         final_metadata[b64_key] = {
             "type": "image",
             "iiif_id": iiif_id,
-            "url": p1_item_id,
+            "iiif": f"{url_base}/info.json",
             "paths": paths,
         }
+        record = titles.get(p1_item_id, {})
+        if isinstance(p1_item_id, str) and p1_item_id.startswith("http") and record is not None:
+            final_metadata[b64_key]["source_url"] = p1_item_id.replace(
+                "http://", "https://", 1
+            )
+            final_metadata[b64_key].update(record)
 
     # --- 4. Final Save and Validation ---
     with open(FINAL_METADATA_PATH, "w") as f:

@@ -56,6 +56,9 @@ async def get_image_by_id(
             status_code=404, detail="Image path not found in document metadata"
         )
 
+    if path_str.startswith(("http://", "https://")):
+        return RedirectResponse(path_str, headers=CACHE_HEADERS)
+
     path = resolve_path(path_str)
 
     if not path.exists():

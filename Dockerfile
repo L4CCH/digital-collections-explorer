@@ -1,5 +1,5 @@
 # === Stage 1: Frontend build ===
-FROM node:22-slim AS node-builder
+FROM --platform=$BUILDPLATFORM node:22-slim AS node-builder
 
 WORKDIR /app
 COPY . /app
@@ -33,6 +33,9 @@ RUN useradd --create-home --uid 1000 dce && \
 ENV DCE_DATA_DIR=/data \
     HF_HOME=/app/.cache/huggingface \
     PYTHONUNBUFFERED=1
+
+# 0 stops OpenSSL from detecting CPU features, which crashes it on Apple M4 Macs.
+ENV OPENSSL_armcap=0
 
 ARG PRELOAD_MODEL=true
 COPY config.json docker/preload_model.py /tmp/preload/

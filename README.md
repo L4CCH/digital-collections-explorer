@@ -4,7 +4,7 @@
 
 **Digital Collections Explorer is an open-source search site for image collections that have little or no metadata.** A library, archive or museum points it at a folder, an S3 bucket or a manifest of images. Visitors can then search the collection in plain language ("a steam locomotive", "a handwritten letter with a red seal"), search with a picture, wander through it, and follow every image back to the institution's own record. No catalog, tags or OCR are needed, and where a catalog exists, search reads its records too.
 
-The [project site](https://digital-collections-explorer.com/) has a live demo and the documentation. The software is built by the [Lab for Computing Cultural Heritage](https://l4cch.github.io/lab-website/) at the University of Washington Information School and is described in [our paper in *Computational Humanities Research*](https://doi.org/10.1017/chr.2025.10017).
+The [project site](https://l4cch.github.io/dce-website/) has the documentation and the collections searched with it, among them the [maps of the Library of Congress](https://digital-collections-explorer.com/) from our paper. The project started at the [Lab for Computing Cultural Heritage](https://l4cch.github.io/lab-website/) at the University of Washington Information School, is developed in the open with contributors from other institutions, and is described in [our paper in *Computational Humanities Research*](https://doi.org/10.1017/chr.2025.10017).
 
 ![A diagram showing an overview of our Digital Collections Explorer, including its various components.](overview.png)
 
@@ -47,7 +47,7 @@ The site's interface lives in `src/frontend/default`. Another frontend can take 
 
 With an AI coding agent such as Claude Code, Codex, Gemini CLI or Cursor, ask it to make your collection searchable. The `dce-setup` skill in `skills/` walks it through profiling, indexing and serving.
 
-With Docker, one command builds the index and another serves it. The image is built for x86-64, so on Apple Silicon Docker runs it under emulation. The published image shows every kind of material; an image of your own built with `docker build --build-arg MEDIA=pdf .` holds only what you list.
+With Docker, one command builds the index and another serves it. The image runs on x86-64 and ARM machines, Apple Silicon and AWS Graviton among them. The published image shows every kind of material; an image of your own built with `docker build --build-arg MEDIA=pdf .` holds only what you list.
 
 ```bash
 docker run --rm -v "$PWD/my-collection:/data" -v /path/to/images:/source:ro ghcr.io/l4cch/digital-collections-explorer ingest /source
@@ -63,16 +63,18 @@ deploy/aws/deploy.sh my-collection --source s3://bucket/prefix --anonymous --htt
 
 ## Documentation
 
-The [documentation](https://digital-collections-explorer.com/docs/) covers:
+The [documentation](https://l4cch.github.io/dce-website/docs/) covers:
 
-- [Indexing large or remote collections](https://digital-collections-explorer.com/docs/indexing/)
-- [Describing a collection to visitors](https://digital-collections-explorer.com/docs/describing-a-collection/)
-- [Collections split into groups](https://digital-collections-explorer.com/docs/groups/)
-- [Searching by appearance and by catalog](https://digital-collections-explorer.com/docs/search/)
-- [Models: SigLIP, SigLIP 2 and CLIP](https://digital-collections-explorer.com/docs/models/)
-- [Limits that protect a public site](https://digital-collections-explorer.com/docs/limits/)
-- Deploying [to a Linux server](https://digital-collections-explorer.com/docs/deploy/server/), [to AWS](https://digital-collections-explorer.com/docs/deploy/aws/), or [under a path of an existing website](https://digital-collections-explorer.com/docs/deploy/under-a-path/)
-- [The MCP server for AI assistants](https://digital-collections-explorer.com/docs/mcp-server/)
+- [Indexing large or remote collections](https://l4cch.github.io/dce-website/docs/indexing/)
+- [Kinds of material: 3D models, PDFs and deep zoom](https://l4cch.github.io/dce-website/docs/kinds-of-material/)
+- [Describing a collection to visitors](https://l4cch.github.io/dce-website/docs/describing-a-collection/)
+- [Collections split into groups](https://l4cch.github.io/dce-website/docs/groups/)
+- [Searching by appearance and by catalog](https://l4cch.github.io/dce-website/docs/search/)
+- [Models: SigLIP, SigLIP 2 and CLIP](https://l4cch.github.io/dce-website/docs/models/)
+- [Limits that protect a public site](https://l4cch.github.io/dce-website/docs/limits/)
+- Deploying [to a Linux server](https://l4cch.github.io/dce-website/docs/deploy/server/), [to AWS](https://l4cch.github.io/dce-website/docs/deploy/aws/), or [under a path of an existing website](https://l4cch.github.io/dce-website/docs/deploy/under-a-path/)
+- [Making a frontend](https://l4cch.github.io/dce-website/docs/making-a-frontend/)
+- [The MCP server for AI assistants](https://l4cch.github.io/dce-website/docs/mcp-server/)
 
 ## Citation
 
