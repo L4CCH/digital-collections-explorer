@@ -1,5 +1,5 @@
 # === Stage 1: Frontend build ===
-FROM node:22-slim AS node-builder
+FROM --platform=$BUILDPLATFORM node:22-slim AS node-builder
 
 WORKDIR /app
 COPY . /app
