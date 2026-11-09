@@ -159,6 +159,10 @@ def test_site_answers_whether_or_not_the_proxy_strips_the_base_path(site_under_m
         )
 
 
+def test_home_page_is_checked_on_every_visit(site_under_maps):
+    assert site_under_maps.get("/maps/").headers["cache-control"] == "no-cache"
+
+
 def test_site_root_without_its_slash_is_sent_to_the_folder(site_under_maps):
     response = site_under_maps.get("/maps", follow_redirects=False)
     assert response.status_code == 307
