@@ -23,7 +23,7 @@ The split was half right. Reading a source, such as Smithsonian EDAN records, it
 - Every collection is stored in one format, whether DCE indexed it or a pipeline prepared it.
 - DCE has the only code that writes that format, used by `src.ingest` and by any pipeline.
 - Whatever a source holds reaches the site through one documented manifest, and the profile says what the data supports before indexing.
-- Existing collections keep working: si-oa bundles as they are, older collections after one conversion that keeps their vectors.
+- si-oa bundles keep working as they are. The old format is not read any more: only the Library of Congress maps still use it, and they are written again in the new one.
 - One site can search the collections of several institutions together, each keeping its own name and license.
 
 Not goals: reading particular catalog systems inside DCE, editing records on a running site.
@@ -63,7 +63,7 @@ Rules that hold throughout:
 - `thumbnail`, `processed` and `original` are paths relative to the collection folder or web addresses, and may be empty when `iiif` names a service that serves the sizes.
 - Any column or table the site does not know is left alone, so a pipeline may keep its own, as si-oa keeps `unit_code`, `etag` and `guid`.
 
-Format 3 is format 2 with these optional columns. The site reads both, so si-oa bundles need no change. An older site does not load format 3 at all, rather than showing a collection without its PDFs and IIIF services.
+`format` in `index_info.json` tells the site how a collection's folder is laid out. Format 3 is format 2, the layout si-oa bundles have, with these optional columns. The site reads both, so si-oa bundles need no change. An older site does not load format 3 at all, rather than showing a collection without its PDFs and with blank images where an IIIF service was to serve them.
 
 ## 2. Several institutions in one site
 
@@ -161,13 +161,13 @@ One writer, `src/collection/`, takes items, records, fields, facets, related sou
 
 - `python -m src.ingest SOURCE --data-dir DIR`: reads the manifest, embeds the images, writes the collection. It continues where it stopped, as now, and writes the collection again at the end of each run.
 - `python -m src.collection build MANIFEST --vectors VECTORS --data-dir DIR`: for a pipeline with its own vectors.
-- `python -m src.collection convert DIR`: turns a collection in the old format into format 3, keeping its vectors as they are.
 
 ## 5. Existing collections
 
 - si-oa bundles stay as they are. The next one is built by `src.collection build` from what smithsonian-search writes.
-- The Library of Congress maps are converted once. They then show each map's title and date as fields, filter by date, and search the titles.
-- The site keeps reading the old format for one release, warning that `src.collection convert` turns it into the new one, and then stops.
+- The Library of Congress maps are written again in format 3 by `scripts/create_loc_assets.py`, through the writer, from the same vectors. They then show each map's title and date as fields, filter by date, and search the titles.
+- A collection indexed by an earlier version of DCE is written again in format 3 by running the same `src.ingest` command: the vectors it computed are kept in its `state.sqlite`, so nothing is embedded again.
+- The site stops reading the old format, `embeddings.pt`, `item_ids.pt` and `metadata.json`, once the Library of Congress maps are moved, and the code that reads it goes.
 - `catalog.sqlite`, from the unpublished branch `feature/catalog-search`, is never released. Its column rules, dates with decades and vocabulary move into the writer.
 
 ## 6. Changes to smithsonian-search
@@ -187,14 +187,15 @@ Each phase is one branch that works on its own.
 
 1. The writer and format 3, with the site reading formats 2 and 3, and tests that a si-oa bundle reads as before.
 2. `src.ingest` writes format 3: records, fields, facets, search over the catalog and groups for every collection, each group's institution and license on the object's page, and the profile uses the writer's rules.
-3. PDF pages, IIIF services and the three image modes in format 3, and the warning on the old format.
-4. `src.collection convert`, then the Library of Congress maps on format 3.
+3. PDF pages, IIIF services and the three image modes in format 3.
+4. The Library of Congress maps in format 3, then the old format's reader removed.
 5. `src.collection build`, then smithsonian-search writing the manifest for the next si-oa bundle.
 6. The documentation pages, the skill and the website.
 
 ## 9. To decide
 
-1. **Format number.** Writing 3 and reading 2 and 3 (recommended) keeps an older site from loading a collection it would show incompletely. Keeping 2 with optional columns lets an older site show such a collection without its PDFs and IIIF services.
+1. **Format number.** Writing 3 and reading 2 and 3 (recommended) keeps an older site from loading a collection it would show incompletely. Keeping 2 with optional columns lets an older site show such a collection with blank images and without its PDFs.
 2. **Naming groups.** `group_id` now names an object, as `object_id` does, which collides with groups such as museums. Recommended: `group` names a group, and `group_id` keeps naming an object for old manifests, with a warning.
 3. **Fields on the page.** Every catalog column that is not technical (recommended), or only the columns the table above knows.
-4. **When the old format stops being read**: one release after the converter (recommended), or never.
+
+Decided: the old format is not read once the Library of Congress maps are moved (2026-11-10).
