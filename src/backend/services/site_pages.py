@@ -3,7 +3,7 @@
 import re
 from html import escape
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 PROJECT_URL = "https://github.com/L4CCH/digital-collections-explorer"
 PAPER_URL = "https://doi.org/10.1017/chr.2025.10017"
@@ -58,6 +58,14 @@ def home_page(index_html: str, collection: Dict[str, Any]) -> str:
     return page.replace("</head>", f"{tags}\n  </head>", 1)
 
 
+def in_words(names: List[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def license_text(terms: Dict[str, Any]) -> str:
+    return f"{terms['name']} ({terms['note']})" if terms.get("note") else terms["name"]
+
+
 def llms_txt(collection: Dict[str, Any], base_path: str = "") -> str:
     """Describe the site to AI assistants in the llms.txt format"""
     title = collection.get("title") or "Digital Collections Explorer"
@@ -76,15 +84,26 @@ def llms_txt(collection: Dict[str, Any], base_path: str = "") -> str:
         lines += [f"It also holds {count:,} {noun}, searched page by page.", ""]
     if collection.get("models"):
         lines += [f"{collection['models']:,} of the objects have 3D models.", ""]
-    if collection.get("source_name"):
-        lines += [f"The images come from {collection['source_name']}.", ""]
+    groups = collection.get("groups") or []
+    several = len(groups) > 1
+    institution = collection.get("institution") or collection.get("source_name")
+    institutions = [
+        g["institution"] for g in groups if several and g.get("institution")
+    ]
+    if institution or institutions:
+        named = institution or in_words(list(dict.fromkeys(institutions)))
+        lines += [f"The images come from {named}.", ""]
     license_info = collection.get("license") or {}
     if license_info.get("name"):
-        note = f" ({license_info['note']})" if license_info.get("note") else ""
-        lines += [f"License: {license_info['name']}{note}.", ""]
-    groups = collection.get("groups") or []
+        lines += [f"License: {license_text(license_info)}.", ""]
+    licensed = [g for g in groups if several and (g.get("license") or {}).get("name")]
+    if licensed:
+        terms = "; ".join(
+            f"{license_text(g['license'])} for {g['label']}" for g in licensed
+        )
+        lines += [f"Licenses: {terms}.", ""]
     group_hint = ""
-    if groups:
+    if several:
         kind = (collection.get("group_label") or "group").lower()
         listed = ", ".join(f"{g['label']} (`{g['id']}`)" for g in groups)
         lines += [f"Each image belongs to one {kind}: {listed}.", ""]

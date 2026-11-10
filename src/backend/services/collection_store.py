@@ -19,12 +19,16 @@ VECTORS_DIR = "vectors"
 
 ITEMS_QUERY = """
     SELECT i.id, i.group_id, i.record_id, i.file_name, i.width, i.height,
-           i.thumbnail, i.processed, i.original, r.title, r.source_url,
-           {view_orbit}, {model_url}
+           i.thumbnail, i.processed, i.original, r.title, r.source_url, {optional}
     FROM items i LEFT JOIN records r ON r.record_id = i.record_id
 """
+OPTIONAL_COLUMNS = {
+    "items": ("view_orbit", "iiif", "page"),
+    "records": ("model_url", "document", "pages"),
+}
 FIELDS_QUERY = (
-    "SELECT label, value FROM record_fields WHERE record_id = ? ORDER BY position"
+    "SELECT {field}, label, value FROM record_fields WHERE record_id = ? "
+    "ORDER BY position"
 )
 FACETS_QUERY = (
     "SELECT facet, value FROM record_facets WHERE record_id = ? ORDER BY facet, value"
@@ -137,18 +141,20 @@ def load_grouped(embeddings_dir: Path, model_name: str) -> LoadedIndex:
 
 
 def read_grouped_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
-    """Describe every image from the items and records tables of metadata.sqlite"""
+    """Describe every image, page and view from the items and records of metadata.sqlite"""
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        query = ITEMS_QUERY.format(
-            view_orbit=(
-                "i.view_orbit" if "view_orbit" in columns(con, "items") else "NULL"
-            ),
-            model_url=(
-                "r.model_url" if "model_url" in columns(con, "records") else "NULL"
-            ),
+        optional = [
+            f"{table[0]}.{name}" if name in columns(con, table) else "NULL"
+            for table, names in OPTIONAL_COLUMNS.items()
+            for name in names
+        ]
+        rows = con.execute(ITEMS_QUERY.format(optional=", ".join(optional))).fetchall()
+        with_fields = (
+            {r for (r,) in con.execute("SELECT DISTINCT record_id FROM record_fields")}
+            if "record_id" in columns(con, "record_fields")
+            else set()
         )
-        rows = con.execute(query).fetchall()
     finally:
         con.close()
     metadata = {}
@@ -165,21 +171,34 @@ def read_grouped_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
         title,
         source_url,
         view_orbit,
+        iiif,
+        page,
         model_url,
+        document,
+        pages,
     ) in rows:
         paths = {"thumbnail": thumbnail, "processed": processed, "original": original}
+        is_page = page is not None
         described = {
             "file_name": file_name,
-            "type": "image",
+            "type": "pdf_page" if is_page else "image",
             "width": width,
             "height": height,
             "title": title,
             "source_url": source_url,
             "object_id": record_id,
+            "cataloged": bool(
+                record_id and (title or source_url or record_id in with_fields)
+            ),
             "group": group_id,
             "paths": {k: v for k, v in paths.items() if v},
             "model_url": model_url,
             "view_orbit": view_orbit,
+            "iiif": iiif,
+            "page": page,
+            "pages": pages if is_page else None,
+            "document": document if is_page else None,
+            "document_key": record_id if is_page else None,
         }
         metadata[item_id] = {k: v for k, v in described.items() if v is not None}
     return metadata
@@ -251,9 +270,12 @@ def read_record_details(path: Path, record_id: str) -> Dict[str, Any]:
             )
         }
         if "record_fields" in tables:
+            named = "field" if "field" in columns(con, "record_fields") else "NULL"
             fields = [
-                {"label": label, "value": value}
-                for label, value in con.execute(FIELDS_QUERY, (record_id,))
+                {"field": field, "label": label, "value": value}
+                for field, label, value in con.execute(
+                    FIELDS_QUERY.format(field=named), (record_id,)
+                )
             ]
         if "record_facets" in tables:
             for facet, value in con.execute(FACETS_QUERY, (record_id,)):

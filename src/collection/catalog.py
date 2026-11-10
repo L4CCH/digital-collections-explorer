@@ -41,7 +41,16 @@ KINDS = {
         "person",
         "sitter",
     ),
-    "dates": ("date", "dates", "year", "date_created", "created", "period"),
+    "dates": (
+        "date",
+        "dates",
+        "year",
+        "date_created",
+        "created",
+        "creation_date",
+        "production_date",
+        "period",
+    ),
     "places": (
         "place",
         "location",
@@ -62,6 +71,7 @@ KINDS = {
         "material",
         "technique",
         "dimensions",
+        "measurements",
         "extent",
         "physical_description",
     ),
@@ -129,6 +139,7 @@ NOT_CATALOG = {
 }
 LINKS = set(SOURCE_URL_KEYS)
 LIST_SEPARATOR = re.compile(r"\s*[;|]\s*")
+TRAILING_MARKS = " ,;:/"
 YEAR = re.compile(r"\b(1[0-9]{3}|20[0-9]{2})\b")
 DECADE_IN_TEXT = re.compile(r"\b(1[0-9]{2}0|20[0-9]0)s\b")
 FILED_DATE = re.compile(r"\d{1,4}s|\d{1,4}\s*[-–]\s*\d{1,4}|\d{1,4}")
@@ -137,6 +148,26 @@ FILE_OR_MEDIA_TYPE = re.compile(
     r"[\w.+-]+/[\w.+-]+|\S+\.(jpe?g|png|tiff?|gif|webp|jp2|pdf|glb|gltf|parquet)",
     re.IGNORECASE,
 )
+
+
+OBJECT_COLUMNS = ("object_id", "record_id", "item_id")
+GROUP_ID_NAMES_OBJECTS = (
+    "The group_id column is read as the object each file shows, as in earlier "
+    "versions. To split the collection into groups, such as museums, name it group."
+)
+GROUP_ID_LEFT_OUT = (
+    "The group_id column is left out, since {column} names each file's object. "
+    "To split the collection into groups, such as museums, name it group."
+)
+
+
+def group_id_warning(columns) -> str | None:
+    """What becomes of a group_id column, which names objects rather than groups"""
+    names = [str(column).strip().lower() for column in columns]
+    if "group_id" not in names or "group" in names:
+        return None
+    column = next((c for c in OBJECT_COLUMNS if c in names), None)
+    return GROUP_ID_LEFT_OUT.format(column=column) if column else GROUP_ID_NAMES_OBJECTS
 
 
 @dataclass
@@ -181,10 +212,29 @@ def unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def enclosed(value: str) -> bool:
+    """Whether square brackets hold the whole value, as a cataloger's supplied value is"""
+    if not (value.startswith("[") and value.endswith("]")):
+        return False
+    depth = 0
+    for position, character in enumerate(value):
+        depth += {"[": 1, "]": -1}.get(character, 0)
+        if depth == 0 and position < len(value) - 1:
+            return False
+    return depth == 0
+
+
+def filed_value(value: str) -> str:
+    """A value as a filter lists it, without the brackets and closing marks of cataloging rules"""
+    value = value.strip().rstrip(TRAILING_MARKS).strip()
+    return value[1:-1].strip() if enclosed(value) else value
+
+
 def split(values: list[str]) -> list[str]:
-    return unique(
-        [part for value in values for part in LIST_SEPARATOR.split(value) if part]
+    parts = (
+        filed_value(part) for value in values for part in LIST_SEPARATOR.split(value)
     )
+    return unique([part for part in parts if part])
 
 
 def with_decades(dates: list[str]) -> list[str]:
@@ -208,6 +258,28 @@ def filed_dates(dates: list[str]) -> list[str]:
         else:
             filed += [f"{decade}s" for decade in DECADE_IN_TEXT.findall(date)]
     return unique(filed)
+
+
+def column_role(column: str, values: list) -> tuple[str | None, str | None]:
+    """What the site reads a column as and the filter it feeds, as read_catalog does"""
+    lowered = str(column).strip().lower()
+    if lowered == "group":
+        return "group", None
+    if lowered in OBJECT_ID_KEYS:
+        return "object", None
+    if lowered in NOT_CATALOG:
+        return "file", None
+    if lowered in LINKS:
+        return "link", None
+    texts = [text for value in values for text in values_of(value)]
+    if not texts:
+        return None, None
+    kind = kind_of(column)
+    if kind is None:
+        if all(NUMBER.fullmatch(text) for text in texts):
+            return None, None
+        kind = "notes"
+    return kind, FILTERED_AS.get(kind)
 
 
 def read_catalog(columns: dict[str, Any], record_id: str | None = None) -> Catalog:

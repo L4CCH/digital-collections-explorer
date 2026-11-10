@@ -152,6 +152,7 @@ class Record:
     catalog: dict[str, Any] = field(default_factory=dict)
     fields: list[tuple[str, str]] | None = None
     facets: list[tuple[str, str]] | None = None
+    searchable_id: bool = True
 
 
 @dataclass
@@ -235,7 +236,7 @@ def write_vectors(folder: Path, models, groups, items, vectors) -> dict[str, int
 
 def described(record: Record) -> tuple[tuple, list, list, dict[str, list[str]]]:
     """A record's row, its page's fields, its filters and its search text"""
-    catalog = read_catalog(record.catalog, record.id)
+    catalog = read_catalog(record.catalog, record.id if record.searchable_id else None)
     fields = (
         [(None, label, value) for label, value in record.fields]
         if record.fields is not None
@@ -350,6 +351,7 @@ def write_metadata(path: Path, items, records, related) -> dict[str, int]:
         "searchable_records": len(texts),
         "vocabulary": len(vocabulary),
         "related_sources": len(related),
+        "filters": sorted({facet for _, facet, _ in facets}),
     }
 
 

@@ -216,6 +216,7 @@ class ObjectDetails(BaseModel):
     )
     group: Optional[str]
     page: str = Field(description="The object's page on the site")
+    institution: Optional[str] = Field(description="Where the object's record is kept")
     record: Optional[str] = Field(description="The institution's own record")
     license: Optional[str]
     images: List[str] = Field(description="Every image of the object, full size")
@@ -230,6 +231,8 @@ class Group(BaseModel):
     label: str
     images: int
     objects: int
+    institution: Optional[str] = None
+    license: Optional[str] = None
 
 
 class CollectionSummary(BaseModel):
@@ -356,11 +359,15 @@ def cropped(image: Image.Image, crop: Optional[Crop]) -> Image.Image:
     return image.crop(box)
 
 
-def license_of(collection: Dict[str, Any]) -> Optional[str]:
-    terms = collection.get("license") or {}
+def license_of(described: Dict[str, Any]) -> Optional[str]:
+    terms = described.get("license") or {}
     return (
         " ".join(part for part in (terms.get("name"), terms.get("url")) if part) or None
     )
+
+
+def group_of(collection: Dict[str, Any], group: Optional[str]) -> Dict[str, Any]:
+    return next((g for g in collection.get("groups") or [] if g["id"] == group), {})
 
 
 @server.tool(title="Describe the collection", annotations=READ_ONLY)
@@ -371,7 +378,17 @@ async def describe_collection() -> CollectionSummary:
         title=collection.get("title") or "",
         description=collection.get("description") or None,
         group_label=collection.get("group_label"),
-        groups=[Group(**g) for g in collection.get("groups") or []],
+        groups=[
+            Group(
+                id=g["id"],
+                label=g["label"],
+                images=g["images"],
+                objects=g["objects"],
+                institution=g.get("institution"),
+                license=license_of(g),
+            )
+            for g in collection.get("groups") or []
+        ],
         images=collection.get("images") or 0,
         objects=collection.get("objects") or 0,
         images_without_record=collection.get("uncataloged_images") or 0,
@@ -572,15 +589,20 @@ async def get_object(
     metadata = item.get("metadata") or {}
     record = item.get("record") or {}
     photos = item.get("photos") or [item]
+    group = group_of(collection, metadata.get("group"))
     return ObjectDetails(
         id=item["id"],
         title=metadata.get("title"),
         group=labels.get(metadata.get("group"), metadata.get("group")),
         page=f"{site}/#/item/{quote(item['id'], safe='')}",
+        institution=group.get("institution") or collection.get("institution"),
         record=metadata.get("source_url"),
-        license=license_of(collection),
+        license=license_of(group) or license_of(collection),
         images=[f"{site}/images/{quote(p['id'], safe='')}?size=full" for p in photos],
-        fields=[RecordField(**f) for f in record.get("fields") or []],
+        fields=[
+            RecordField(label=f["label"], value=f["value"])
+            for f in record.get("fields") or []
+        ],
         elsewhere=[
             Elsewhere(source=r.get("source"), title=r.get("title"), url=r.get("url"))
             for r in record.get("related") or []

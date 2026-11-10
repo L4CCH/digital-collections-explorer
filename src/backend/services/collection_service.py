@@ -33,6 +33,7 @@ DEFAULT_COLLECTION = {
     "description": "Explore this collection by describing what you are looking for, "
     "or simply start wandering.",
     "example_queries": [],
+    "institution": None,
     "source_name": None,
     "license": None,
     "links": [],
@@ -82,7 +83,7 @@ class CollectionService:
             self.position[item_id] = index
             self.object_ids.append(object_id)
             self.members.setdefault(object_id, []).append(index)
-            cataloged.append(bool(record))
+            cataloged.append(metadata.get("cataloged", bool(record)))
             if servable_model(metadata.get("model_url")):
                 self.object_model.setdefault(object_id, index)
             if metadata.get("view_orbit"):
@@ -259,10 +260,37 @@ class CollectionService:
             hosts |= image_hosts(metadata)
         return sorted(hosts)
 
-    def group_summary(self) -> List[Dict[str, Any]]:
-        """Each group with how many images and objects it holds"""
+    def group_summary(self, configured: Any = None) -> List[Dict[str, Any]]:
+        """Each group's size, with its label, institution and license from collection.json"""
         self._ensure_index()
-        return [dict(group) for group in self.groups]
+        named = configured if isinstance(configured, dict) else {}
+        position = {key: n for n, key in enumerate(named)}
+        summary = []
+        for group in self.groups:
+            key = group["id"] if group["id"] in named else group["label"]
+            own = named.get(key)
+            own = own if isinstance(own, dict) else {}
+            described = dict(group)
+            described["label"] = own.get("label") or group["label"]
+            institution = own.get("institution") or own.get("source_name")
+            if institution:
+                described["institution"] = institution
+            if own.get("license"):
+                described["license"] = own["license"]
+            summary.append((position.get(key, len(position)), described))
+        return [described for _, described in sorted(summary, key=lambda g: g[0])]
+
+    def configured(self) -> Dict[str, Any]:
+        """What collection.json says of the collection, or nothing if it is missing"""
+        path = Path(settings.data_dir or ".") / COLLECTION_FILE
+        if not (settings.data_dir and path.exists()):
+            return {}
+        try:
+            found = json.loads(path.read_text())
+        except (OSError, ValueError, TypeError) as e:
+            logger.warning(f"Ignoring unreadable {path}: {e}")
+            return {}
+        return found if isinstance(found, dict) else {}
 
     def _metadata(self, index: int) -> Dict[str, Any]:
         item_id = self.embeddings.item_ids[index]
@@ -331,12 +359,11 @@ class CollectionService:
         """Describe the collection: its name, size, and suggested searches"""
         self._ensure_index()
         described = dict(DEFAULT_COLLECTION)
-        path = Path(settings.data_dir or ".") / COLLECTION_FILE
-        if settings.data_dir and path.exists():
-            try:
-                described.update(json.loads(path.read_text()))
-            except (OSError, ValueError, TypeError) as e:
-                logger.warning(f"Ignoring unreadable {path}: {e}")
+        configured = self.configured()
+        described.update(configured)
+        institution = configured.get("institution") or configured.get("source_name")
+        described["institution"] = institution
+        described["source_name"] = institution
         described["images"] = (
             self.indexed_count - len(self.view_rows) - len(self.page_rows)
         )
@@ -349,7 +376,7 @@ class CollectionService:
             if row not in self.view_rows and row not in self.page_rows
         )
         index = read_index_info(self.embeddings.embeddings_dir) or {}
-        described["groups"] = self.group_summary()
+        described["groups"] = self.group_summary(configured.get("groups"))
         described["catalog_search"] = is_grouped(index) and has_table(
             Path(self.embeddings.embeddings_dir) / METADATA_DB, "records_fts"
         )
@@ -404,10 +431,18 @@ class CollectionService:
         if model:
             described["model"] = model
         if self.groups:
-            described["record"] = read_record_details(
+            record = read_record_details(
                 Path(self.embeddings.embeddings_dir) / METADATA_DB,
                 described["object_id"],
             )
+            labels = self.configured().get("field_labels")
+            labels = labels if isinstance(labels, dict) else {}
+            for shown in record["fields"]:
+                column = shown.pop("field", None)
+                shown["label"] = (
+                    labels.get(column) or labels.get(shown["label"]) or shown["label"]
+                )
+            described["record"] = record
         return described
 
     def similar(

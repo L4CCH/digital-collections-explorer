@@ -2,8 +2,8 @@
 
 ## "already holds an index that this tool did not create"
 
-`ingest` found `embeddings.pt` in the target folder without its own state file.
-Someone built that index another way. Use a different `--data-dir`. Only pass
+`ingest` found a collection in the target folder, an `index_info.json` or an
+`embeddings.pt`, without its own state file. Someone built it another way. Use a different `--data-dir`. Only pass
 `--overwrite` when the person has explicitly said to replace that index.
 
 ## "was built with ..." or "was indexed with ..., but config.json is now set to ..."

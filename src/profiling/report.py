@@ -94,27 +94,41 @@ def problem_lines(p: CollectionProfile) -> list[str]:
     return lines
 
 
+def orphan_lines(p: CollectionProfile) -> list[str]:
+    orphans = p.structure.orphan_items
+    if not orphans or orphans >= p.scan.image_files:
+        return []
+    percent = 100 * orphans / max(1, p.scan.image_files)
+    return [
+        "",
+        f"  WARNING: {orphans:,} images ({percent:.1f}%) have no catalog record",
+    ]
+
+
 def structure_lines(p: CollectionProfile) -> list[str]:
     structure = p.structure
     if not structure.group_unit:
-        return []
+        return orphan_lines(p)
     per_group = structure.items_per_group
     lines = [
         "",
         f"  Objects: {per_group['mean']:.2f} images per object on average, "
         f"up to {int(per_group['max'])}",
     ]
-    if structure.orphan_items:
-        percent = 100 * structure.orphan_items / max(1, p.scan.image_files)
-        lines.append(
-            f"  WARNING: {structure.orphan_items:,} images ({percent:.1f}%) "
-            f"have no catalog record"
-        )
+    lines += orphan_lines(p)[1:]
     if structure.suggested_collapse:
         lines.append(
             f"  Suggestion: group results by object. {structure.collapse_reason}"
         )
     return lines
+
+
+def group_lines(p: CollectionProfile) -> list[str]:
+    groups = p.structure.groups
+    if len(groups) < 2:
+        return []
+    listed = ", ".join(f"{name} {count:,}" for name, count in groups.items())
+    return ["", f"  Groups ({p.structure.group_column}): {listed}"]
 
 
 def naming_lines(p: CollectionProfile) -> list[str]:
@@ -140,9 +154,9 @@ def naming_lines(p: CollectionProfile) -> list[str]:
             if signal.guess == "constant":
                 continue
             verdict = (
-                "usable as a filter"
+                "meaningful, but not used by the site"
                 if signal.looks_meaningful
-                else "not useful as a filter"
+                else "no clear meaning"
             )
             role = DIR_ROLE_LABEL.get(signal.guess, signal.guess)
             lines.append(
@@ -153,23 +167,73 @@ def naming_lines(p: CollectionProfile) -> list[str]:
     return lines
 
 
+KIND_WORDS = {
+    "names": "names",
+    "dates": "dates",
+    "places": "places",
+    "cultures": "cultures",
+    "subjects": "subjects",
+    "object_types": "kinds of object",
+    "physical": "materials",
+    "identifiers": "catalog numbers",
+    "notes": "notes",
+}
+ROLE_WORDS = {
+    "title": "the title, searched",
+    "link": "the link back to the record",
+    "object": "the object each file shows",
+    "group": "the group filter",
+    "file": "the file, not catalog text",
+}
+CAPABILITY_WORDS = {
+    "text_search": "search by description",
+    "image_search": "search by an image",
+    "visual_similarity": "find similar images",
+    "catalog_search": "search the catalog text as well",
+    "titles": "show titles",
+    "links_back": "link to each record at the institution",
+    "objects": "show an object's images together",
+    "group_filter": "filter by group",
+}
+
+
+def use_of(f) -> str:
+    """What the site does with a column, in a few words"""
+    if f.provenance != Provenance.CATALOG:
+        return "not used by the site"
+    if f.read_as in ROLE_WORDS:
+        return ROLE_WORDS[f.read_as]
+    if f.read_as not in KIND_WORDS:
+        return "not shown or searched"
+    use = f"{KIND_WORDS[f.read_as]}: on the page, searched"
+    if f.filtered_as:
+        use += f", filter by {f.filtered_as.replace('_', ' ')}"
+    return use
+
+
 def field_lines(p: CollectionProfile) -> list[str]:
-    lines = ["", "  What you can use:"]
+    capabilities = p.capabilities
+    able = [CAPABILITY_WORDS.get(c, c) for c in capabilities.available]
+    lines = ["", "  The site will:"] + [f"      - {words}" for words in able]
+    if capabilities.facets:
+        filters = ", ".join(f.replace("_", " ") for f in capabilities.facets)
+        lines.append(f"      - filter by {filters}")
+    lines += ["", "  What the site does with each column:"]
     for f in (f for f in p.fields if f.available):
-        uses = [
-            label
-            for flag, label in ((f.facetable, "filter"), (f.searchable, "text search"))
-            if flag
-        ]
         lines.append(
             f"      [{SOURCE_LABEL.get(f.provenance, '?')}] {f.name:<20} "
-            f"{f.coverage:>4.0%} filled   {', '.join(uses) or 'display only'}"
+            f"{f.coverage:>4.0%} filled   {use_of(f)}"
         )
         if f.note:
             lines.append(f"               {f.note}")
     missing = [f for f in p.fields if not f.available]
-    if missing:
+    unable = [c for c in capabilities.unavailable if c.capability == "catalog_search"]
+    if missing or unable:
         lines += ["", "  What is not possible:"]
+        for c in unable:
+            lines.append(f"      x {CAPABILITY_WORDS[c.capability]}")
+            lines.append(f"         Why: {c.reason}")
+            lines.append(f"         Possible fix: {c.remedy}")
         for f in missing:
             lines.append(f"      x {f.name}")
             lines.append(f"         Why: {f.note}")
@@ -251,6 +315,7 @@ def render(p: CollectionProfile) -> str:
         overview_lines,
         problem_lines,
         structure_lines,
+        group_lines,
         naming_lines,
         field_lines,
         sizing_lines,

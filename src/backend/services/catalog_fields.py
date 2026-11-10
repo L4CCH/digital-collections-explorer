@@ -1,5 +1,6 @@
 """Pick out the catalog fields the site relies on, whatever the collection calls them."""
 
+import math
 import re
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -25,10 +26,13 @@ IIIF_IMAGE_REQUEST = re.compile(
 
 def object_id_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
     """Return the id of the object this image belongs to, if the catalog has one"""
+    named = {str(key).strip().lower(): value for key, value in (catalog or {}).items()}
     for key in OBJECT_ID_KEYS:
-        value = (catalog or {}).get(key)
-        if value not in (None, ""):
-            return str(value)
+        value = named.get(key)
+        if isinstance(value, float) and math.isnan(value):
+            continue
+        if value not in (None, "") and str(value).strip():
+            return str(value).strip()
     return None
 
 

@@ -47,6 +47,7 @@ function App() {
     () => Object.fromEntries((collection?.groups || []).map((group) => [group.id, group.label])),
     [collection],
   );
+  const institution = collection?.institution || collection?.source_name;
 
   useEffect(() => {
     getCollection()
@@ -227,8 +228,7 @@ function App() {
                   && (collection.images > 0 || !(collection.models || collection.documents))
                   && counted(collection.images, 'image'),
                 collection.documents > 0 && counted(collection.documents, 'PDF'),
-                collection.source_name && !named(title, collection.source_name)
-                  && `from ${collection.source_name}`,
+                institution && !named(title, institution) && `from ${institution}`,
               ].filter(Boolean).join(' · ')}
             </p>
           </>

@@ -1,6 +1,6 @@
 # One collection format, one pipeline
 
-Status: proposal for review, 2026-11-10.
+Status: decided 2026-11-10. Phases 1 and 2 are built; phase 2 took in phase 3.
 
 ## Why
 
@@ -32,7 +32,7 @@ Not goals: reading particular catalog systems inside DCE, editing records on a r
 
 ```
 my-collection/
-  collection.json             title, introduction, suggested searches, links, labels
+  collection.json             title, introduction, suggested searches, links, groups, field labels
   embeddings/
     index_info.json           format 3
     vectors/<model>/<group>.npy        float32, one L2-normalized row per image
@@ -60,6 +60,7 @@ my-collection/
 Rules that hold throughout:
 
 - An item without a record is its own object and has no catalog record.
+- A file with catalog text but no object id is its own object with a record of its own, whose made-up id is not searched.
 - `thumbnail`, `processed` and `original` are paths relative to the collection folder or web addresses, and may be empty when `iiif` names a service that serves the sizes.
 - Any column or table the site does not know is left alone, so a pipeline may keep its own, as si-oa keeps `unit_code`, `etag` and `guid`.
 
@@ -68,6 +69,8 @@ Rules that hold throughout:
 ## 2. Several institutions in one site
 
 A site with several institutions is one collection split into groups, as si-oa is split into museums: one index, one ranking, one filter. The groups come from a `group` column of the files table, or from a pipeline that hands over its vectors group by group. They are indexed together, so they share the model.
+
+A group's id is its value in lowercase, with anything but letters and digits turned into hyphens, so `Cleveland Museum of Art` becomes `cleveland-museum-of-art`; `collection.json` may name a group by either, and lists them in the order the filter shows them. Files without a group are in the group `collection`.
 
 Each group may name its own institution and license in `collection.json`, beside the collection's:
 
@@ -90,7 +93,7 @@ What institutions share is the format, not their catalogs:
 
 - The format's core is the same for all: where each file is, the object it shows, the title and the link back.
 - Each maps its own catalog columns onto the same searched fields, so one's `creator` and another's `artist` are both names (section 3).
-- The filters use the same six categories for all, with values as each catalog spells them, except dates, which are read as years.
+- The filters use the same six categories for all, with values as each catalog spells them, except dates, which are read as years, and the square brackets and closing marks of cataloging rules, which are left out, so `[Japan],` is filed as `Japan`.
 - The fields on an object's page are each record's own, so no institution has to change its catalog.
 
 ## 3. The collection manifest
@@ -124,16 +127,16 @@ Catalog columns are read by name, case aside and plurals too:
 | Title | `title`, `label` | as the title | title | |
 | Link back | `source_url`, `guid`, `record_url`, `landing_page`, `permalink` | as the link | | |
 | Names | `creator`, `author`, `artist`, `maker`, `photographer`, `contributor`, `publisher`, `people`, `sitter` | yes | names | `name` |
-| Dates | `date`, `year`, `date_created`, `created`, `period` | yes | dates, with each year's decade | `date` |
+| Dates | `date`, `year`, `date_created`, `created`, `creation_date`, `production_date`, `period` | yes | dates, with each year's decade | `date` |
 | Places | `place`, `location`, `geography`, `spatial`, `coverage`, `country`, `region`, `state`, `county`, `city` | yes | places | `place` |
 | Cultures | `culture`, `nationality`, `people_group` | yes | topics | `culture` |
 | Subjects | `subject`, `topic`, `keywords`, `tags`, `theme` | yes | topics | `topic` |
 | Kinds of object | `object_type`, `genre`, `classification`, `kind`, `work_type` | yes | object types | `object_type` |
-| Materials | `medium`, `material`, `technique`, `dimensions`, `extent` | yes | physical | |
+| Materials | `medium`, `material`, `technique`, `dimensions`, `measurements`, `extent` | yes | physical | |
 | Catalog numbers | `identifier`, `accession_number`, `object_number`, `call_number`, `catalog_number`, `inventory_number` | yes | identifiers | |
 | Notes | `description`, `notes`, `summary`, `abstract`, `caption`, `inscription`, `transcription`, any other column of text | yes | notes | |
 
-Several values in one cell are separated by `;` or `|`. Web addresses, file names, media types and columns of numbers are not catalog text. A page shows each field under its column name, unless `collection.json` gives the column a label.
+Several values in one cell are separated by `;` or `|`. Web addresses, file names, media types and columns of numbers are not catalog text. A page shows each field under its column name, unless `field_labels` in `collection.json` gives the column a label, such as `{"creation_date": "Date"}`. A `group_id` column still names objects, as in earlier manifests, and ingest and the profile say so.
 
 A pipeline that knows more than a table can say may add, beside the records:
 
@@ -143,7 +146,7 @@ A pipeline that knows more than a table can say may add, beside the records:
 
 **Vectors**, optional: a pipeline that embeds the files itself, as si-oa does with two models, hands over `vectors/<model>/<group>.npy` and `.ids.npy` with the models' details, and DCE writes the rest without embedding again.
 
-**What each part of the site needs.** The profile reports this for every collection before indexing, with the same rules the writer uses, so what an agent tells a person is what the site will do:
+**What each part of the site needs.** The profile reports this for every collection before indexing, with the same rules the writer uses, so what an agent tells a person is what the site will do. Dates read from photo files and folder names are reported, but the site does not use them:
 
 | The site can | when the data has |
 | --- | --- |
@@ -187,7 +190,7 @@ Each phase is one branch that works on its own.
 
 1. The writer and format 3, with the site reading formats 2 and 3, and tests that a si-oa bundle reads as before.
 2. `src.ingest` writes format 3: records, fields, facets, search over the catalog and groups for every collection, each group's institution and license on the object's page, and the profile uses the writer's rules.
-3. PDF pages, IIIF services and the three image modes in format 3.
+3. PDF pages, IIIF services and the three image modes in format 3. Done in phase 2, since ingest writes them and nothing indexed here would otherwise show its PDFs and IIIF images.
 4. The Library of Congress maps in format 3, then the old format's reader removed.
 5. `src.collection build`, then smithsonian-search writing the manifest for the next si-oa bundle.
 6. The documentation pages, the skill and the website.

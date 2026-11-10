@@ -100,6 +100,33 @@ def human_bytes(value: float) -> str:
         value /= 1024
 
 
+def plural(count: int, noun: str) -> str:
+    return f"{count:,} {noun}{'' if count == 1 else 's'}"
+
+
+def collection_lines(written: dict | None) -> list[str]:
+    """What the site can do with the collection as written"""
+    if not written:
+        return []
+    objects = written["records"] + written["uncataloged_items"]
+    lines = [
+        f"  Written for the site: {written['items']:,} images and pages, as "
+        f"{plural(objects, 'object')} in {plural(written['groups'], 'group')}"
+    ]
+    if written["uncataloged_items"]:
+        lines.append(
+            f"    {plural(written['uncataloged_items'], 'image')} without a catalog "
+            "record, found by appearance only"
+        )
+    if written["searchable_records"]:
+        lines.append(
+            f"    Catalog search covers {plural(written['searchable_records'], 'record')}"
+        )
+    if written.get("filters"):
+        lines.append(f"    Filters: {', '.join(written['filters'])}")
+    return lines
+
+
 def render_report(summary: dict) -> str:
     run = summary["run"]
     lines = [
@@ -121,6 +148,7 @@ def render_report(summary: dict) -> str:
             f"  The estimate beforehand was {human_duration(run['estimated_seconds'])}"
         )
     lines.append(f"  Read from the source: {human_bytes(run['source_bytes_read'])}")
+    lines += collection_lines(summary.get("collection"))
     disk = summary["disk_bytes_measured"]
     lines.append(f"  Disk used by this collection: {human_bytes(disk['total'])}")
     described = [

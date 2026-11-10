@@ -1,4 +1,5 @@
 import base64
+import json
 from pathlib import Path
 
 import anyio
@@ -343,3 +344,30 @@ def test_the_servers_that_keep_an_image_are_known():
         "https://iiif.example.org"
     }
     assert image_hosts({"paths": {"thumbnail": "thumbnails/a.jpg"}}) == set()
+
+
+def test_an_object_names_its_groups_institution_and_license(tmp_path):
+    cc0 = {"name": "CC0", "url": "https://creativecommons.org/publicdomain/zero/1.0/"}
+    (tmp_path / "collection.json").write_text(
+        json.dumps(
+            {
+                "license": {"name": "CC BY 4.0"},
+                "groups": {
+                    "west": {
+                        "label": "West Museum",
+                        "institution": "the West Museum",
+                        "license": cc0,
+                    }
+                },
+            }
+        )
+    )
+    summary = call("describe_collection").structured_content
+    west = next(g for g in summary["groups"] if g["id"] == "west")
+    assert (west["label"], west["institution"]) == ("West Museum", "the West Museum")
+    assert west["license"] == f"CC0 {cc0['url']}"
+    rifle = call("get_object", {"id": "b1"}).structured_content
+    assert (rifle["group"], rifle["institution"]) == ("West Museum", "the West Museum")
+    assert rifle["license"] == west["license"]
+    quilt = call("get_object", {"id": "a1"}).structured_content
+    assert (quilt["institution"], quilt["license"]) == (None, "CC BY 4.0")
