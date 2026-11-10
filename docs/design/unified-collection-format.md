@@ -1,6 +1,6 @@
 # One collection format, one pipeline
 
-Status: decided 2026-11-10. Phases 1, 2 and 4 are built; phase 2 took in phase 3.
+Status: decided 2026-11-10. Phases 1 to 4 are built, and phase 5 in DCE; phase 2 took in phase 3.
 
 ## Why
 
@@ -140,11 +140,27 @@ Several values in one cell are separated by `;` or `|`. Web addresses, file name
 
 A pipeline that knows more than a table can say may add, beside the records:
 
-- `fields`: `object_id`, `position`, `label`, `value`, to set the page's fields and their order itself
+- `fields`: `object_id`, `position`, `label`, `value`, and `field`, the column it came from, to set the page's fields and their order itself
 - `facets`: `object_id`, `facet`, `value`, to set the filters itself
+- `text`: `object_id`, `field`, `value`, to set what catalog search matches in each searched field: `title`, `names`, `dates`, `places`, `topics`, `object_types`, `notes`, `physical` or `identifiers`
 - `related`: the rows of `related_sources` and `related_tags`
 
+A table given replaces what DCE would read from the catalog columns, for every record. The vocabulary Auto search recognizes always comes from the filters of names, places, subjects and kinds of object, counted over the records that have a file.
+
 **Vectors**, optional: a pipeline that embeds the files itself, as si-oa does with two models, hands over `vectors/<model>/<group>.npy` and `.ids.npy` with the models' details, and DCE writes the rest without embedding again.
+
+**The manifest for `src.collection build`** is a folder of parquet tables:
+
+| Table | Columns | Notes |
+| --- | --- | --- |
+| `files.parquet` | `id`, `group`, `object_id`, `file_name`, `width`, `height`, `thumbnail`, `processed`, `original`, `iiif`, `page`, `view_orbit`, then any catalog columns | required; `id` is the item id the vectors carry, and a file without `group` is in the group of its vector shard |
+| `records.parquet` | `object_id`, `title`, `source_url`, `model_url`, `document`, `pages`, then the catalog | without it, the catalog columns of `files.parquet` are read |
+| `fields.parquet`, `facets.parquet`, `text.parquet` | as above | |
+| `related_sources.parquet`, `related_tags.parquet` | the columns of the tables, with `object_id` for `record_id` | |
+| `groups.parquet` | `group`, `label` | the groups in the order the filter lists them |
+| `source.json` | anything | kept as `source` in `index_info.json` |
+
+The vectors folder holds `models.json`, `{"default_model": KEY, "models": [{"key", "type", "name", "revision", "dimensions"}]}`, and `<key>/<group>.npy` with `<key>/<group>.ids.npy` for each model. Paths in `thumbnail`, `processed`, `original`, `model_url`, `document` and a related source's `thumbnail` are relative to the collection folder, where the pipeline puts the files; `--check-files` refuses a manifest that names one that is not there. Records are written in the order of `records.parquet`, so that records the search scores alike keep the order the pipeline gave them.
 
 **What each part of the site needs.** The profile reports this for every collection before indexing, with the same rules the writer uses, so what an agent tells a person is what the site will do. Dates read from photo files and folder names are reported, but the site does not use them:
 

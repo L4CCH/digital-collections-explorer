@@ -150,8 +150,9 @@ class Record:
     document: str | None = None
     pages: int | None = None
     catalog: dict[str, Any] = field(default_factory=dict)
-    fields: list[tuple[str, str]] | None = None
+    fields: list[tuple[str, str] | tuple[str | None, str, str]] | None = None
     facets: list[tuple[str, str]] | None = None
+    text: dict[str, list[str]] | None = None
     searchable_id: bool = True
 
 
@@ -238,13 +239,13 @@ def described(record: Record) -> tuple[tuple, list, list, dict[str, list[str]]]:
     """A record's row, its page's fields, its filters and its search text"""
     catalog = read_catalog(record.catalog, record.id if record.searchable_id else None)
     fields = (
-        [(None, label, value) for label, value in record.fields]
+        [shown if len(shown) == 3 else (None, *shown) for shown in record.fields]
         if record.fields is not None
         else catalog.fields
     )
     facets = record.facets if record.facets is not None else catalog.facets
     title = record.title or catalog.title
-    text = dict(catalog.text)
+    text = dict(record.text if record.text is not None else catalog.text)
     if title and title not in text.get("title", []):
         text["title"] = [title, *text.get("title", [])]
     row = (
@@ -260,6 +261,7 @@ def described(record: Record) -> tuple[tuple, list, list, dict[str, list[str]]]:
 
 def write_metadata(path: Path, items, records, related) -> dict[str, int]:
     rows, fields, facets, texts = [], [], [], []
+    worded = False
     vocabulary: Counter = Counter()
     for record in records:
         row, shown, filters, text = described(record)
@@ -271,8 +273,9 @@ def write_metadata(path: Path, items, records, related) -> dict[str, int]:
         vocabulary.update(
             {(value, facet) for facet, value in filters if facet in RECOGNIZED}
         )
-        if any(text.get(column) for column in SEARCHED if column != "identifiers"):
+        if any(text.get(column) for column in SEARCHED):
             texts.append((record.id, *("\n".join(text.get(c, [])) for c in SEARCHED)))
+            worded = worded or any(text.get(c) for c in SEARCHED if c != "identifiers")
 
     with sqlite3.connect(path) as con:
         con.executescript(TABLES["items"] + TABLES["records"])
@@ -305,7 +308,7 @@ def write_metadata(path: Path, items, records, related) -> dict[str, int]:
             con.executemany(
                 "INSERT OR IGNORE INTO record_facets VALUES (?, ?, ?)", facets
             )
-        if texts:
+        if worded:
             con.executescript(TABLES["records_fts"])
             marks = ", ".join("?" * (len(SEARCHED) + 1))
             con.executemany(f"INSERT INTO records_fts VALUES ({marks})", texts)
@@ -348,7 +351,7 @@ def write_metadata(path: Path, items, records, related) -> dict[str, int]:
         "records": len(rows),
         "record_fields": len(fields),
         "record_facets": len(facets),
-        "searchable_records": len(texts),
+        "searchable_records": len(texts) if worded else 0,
         "vocabulary": len(vocabulary),
         "related_sources": len(related),
         "filters": sorted({facet for _, facet, _ in facets}),

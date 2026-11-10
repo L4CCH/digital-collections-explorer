@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 from pathlib import Path
 from typing import Any
@@ -11,20 +10,13 @@ import numpy as np
 
 from src.backend.services.catalog_fields import object_id_from
 from src.collection.catalog import read_catalog
+from src.collection.manifest import is_blank, merged
 from src.collection.writer import Group, Item, Model, Record, write_collection
 
 from .state import IngestState
 
 GROUP_COLUMN = "group"
 DEFAULT_GROUP = "collection"
-
-
-def is_blank(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, float):
-        return math.isnan(value)
-    return isinstance(value, str) and not value.strip()
 
 
 def group_of(catalog: dict) -> tuple[str, str]:
@@ -53,16 +45,6 @@ def record_of(item_id: str, metadata: dict, catalog: dict) -> tuple[str | None, 
     if read.title or read.fields or read.source_url:
         return item_id, False
     return None, False
-
-
-def merged(rows: list[dict]) -> dict:
-    """An object's catalog: each column's first value among its files"""
-    catalog: dict = {}
-    for row in rows:
-        for column, value in row.items():
-            if is_blank(catalog.get(column)) and not is_blank(value):
-                catalog[column] = value
-    return catalog
 
 
 def first(members: list[dict], name: str) -> Any:
