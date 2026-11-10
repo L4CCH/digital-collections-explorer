@@ -1,6 +1,6 @@
 # One collection format, one pipeline
 
-Status: decided 2026-11-10. Phases 1 to 4 are built, and phase 5 in DCE; phase 2 took in phase 3.
+Status: decided 2026-11-10. Phases 1 to 5 are built; phase 2 took in phase 3.
 
 ## Why
 
@@ -191,7 +191,7 @@ One writer, `src/collection/`, takes items, records, fields, facets, related sou
 
 ## 6. Changes to smithsonian-search
 
-It keeps everything about the Smithsonian: reading EDAN, units, rights, linking records to Flickr through Harvard LIL, embedding on EC2. It stops writing `metadata.sqlite` and instead writes the manifest: images, records, fields, facets, related sources, and its vectors, then calls `src.collection build`. `dce_bundle.py` shrinks to that.
+It keeps everything about the Smithsonian: reading EDAN, units, rights, linking records to Flickr through Harvard LIL, embedding on EC2. It stops writing `metadata.sqlite` and instead writes the manifest: images, records, fields, facets, the words of each searched field, related sources, and its vectors, then calls `src.collection build`. `dce_bundle.py` shrinks to that, and `models3d.py` adds its views and models to the manifest of the bundle it extends. Written this way, bundle `20261026T063627Z.2.3` comes out the same table by table, except for the 821 records without an image that DCE leaves out, and serves the same results.
 
 ## 7. Documentation
 
