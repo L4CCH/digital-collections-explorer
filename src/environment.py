@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from src.backend.core.config import built_frontend, settings
+from src.backend.core.formats import INDEX_INFO_FILE, READABLE_FORMATS
 
 AWS_CREDENTIAL_FILES = ("~/.aws/credentials", "~/.aws/config")
 AWS_CREDENTIAL_VARIABLES = ("AWS_ACCESS_KEY_ID", "AWS_PROFILE")
@@ -43,8 +44,16 @@ def has_aws_credentials() -> bool:
     return any(Path(path).expanduser().exists() for path in AWS_CREDENTIAL_FILES)
 
 
+def written_format(embeddings_dir: Path) -> int | None:
+    try:
+        return json.loads((embeddings_dir / INDEX_INFO_FILE).read_text()).get("format")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def index_state(embeddings_dir: Path) -> str:
-    if not (embeddings_dir / "embeddings.pt").exists():
+    written = written_format(embeddings_dir) in READABLE_FORMATS
+    if not written and not (embeddings_dir / "embeddings.pt").exists():
         return "empty"
     if (embeddings_dir / INGEST_STATE_FILE).exists():
         return "created_by_ingest"

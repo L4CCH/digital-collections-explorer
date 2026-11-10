@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-INDEX_INFO_FILE = "index_info.json"
+from ..core.formats import INDEX_INFO_FILE, READABLE_FORMATS
 
 # Vector width of each documented model, to name the builder of an older index.
 KNOWN_DIMENSIONS = {
@@ -13,13 +13,10 @@ KNOWN_DIMENSIONS = {
     768: "google/siglip-base-patch16-224",
 }
 
-# The index_info.json format of a collection split into groups, one shard per group.
-GROUPED_FORMAT = 2
-
 
 def is_grouped(info: Optional[dict]) -> bool:
-    """Whether index_info.json describes a collection split into groups"""
-    return bool(info) and info.get("format") == GROUPED_FORMAT
+    """Whether index_info.json describes a collection in vectors/ and metadata.sqlite"""
+    return bool(info) and info.get("format") in READABLE_FORMATS
 
 
 def grouped_model(info: dict, model_name: str) -> Optional[dict]:
