@@ -24,6 +24,7 @@ The split was half right. Reading a source, such as Smithsonian EDAN records, it
 - DCE has the only code that writes that format, used by `src.ingest` and by any pipeline.
 - Whatever a source holds reaches the site through one documented manifest, and the profile says what the data supports before indexing.
 - Existing collections keep working: si-oa bundles as they are, older collections after one conversion that keeps their vectors.
+- One site can search several collections at once, from one institution or many, each keeping its own name, institution and license.
 
 Not goals: reading particular catalog systems inside DCE, editing records on a running site.
 
@@ -64,7 +65,38 @@ Rules that hold throughout:
 
 Format 3 is format 2 with these optional columns. The site reads both, so si-oa bundles need no change. An older site does not load format 3 at all, rather than showing a collection without its PDFs and IIIF services.
 
-## 2. The collection manifest
+## 2. Collections and sites
+
+A **collection** is what one source holds: indexed once, in its own folder, described by its own `collection.json`. A **site** is what visitors search: one collection, as now, or several.
+
+- A site of one collection is that collection's folder, as now.
+- A site of several is a folder with a `site.json` that lists them. `python -m src.collection site DIR` puts them together into one index in that folder, in the same format, linking their vector files rather than copying them, so search ranks every object of every collection against every other and the catalog of each is searched as one. Running it again picks up a collection that changed. Each collection keeps its own folder, can be indexed again on its own, and can belong to several sites.
+- Every collection of a site holds vectors from the site's model. The Library of Congress maps and si-oa both hold CLIP ViT-B/32, so they can share a site searched with CLIP. A collection without the model gets it by being indexed again with that model, which adds its vectors beside the ones it has.
+- In a site of several, item and object ids begin with their collection's id, as in `loc-maps:<id>`, so that two collections cannot collide. A site of one keeps its ids.
+- `index_info.json` lists the site's `collections`, each with its `id`, its folder and its groups. A collection that is not split into groups is one group of its own.
+
+`collection.json` holds what belongs to a collection, and `site.json` what belongs to a site:
+
+| Field | `collection.json` | `site.json` |
+| --- | --- | --- |
+| `title`, `description` | the collection's own | the site's |
+| `institution` | who holds the collection, as in "View the full record at the Library of Congress" | |
+| `license` | the collection's rights | |
+| `object_label`, `group_label`, `sources` | the collection's own | |
+| `example_queries`, `links` | the site's, when the site is this collection alone | the site's |
+| `collections` | | the collections' folders, in the order the site shows them |
+| `collection_label` | | what to call one collection, such as "Institution" |
+
+A site of one reads everything from `collection.json`, so existing files keep working. `source_name` keeps working as another name for `institution`. Both files are read on every visit, so a change shows without building again.
+
+On a site of several:
+
+- The filter offers the collections, and within a collection split into groups, its groups.
+- An object's page names its collection, links to its full record at that collection's institution, and shows that collection's license.
+- The line under the title counts each collection, or all of them when there are many.
+- The MCP server and `llms.txt` describe each collection, and every result says which collection it comes from.
+
+## 3. The collection manifest
 
 What a person or a pipeline gives DCE. The smallest is a folder of files. A catalog comes as one table, or two.
 
@@ -126,32 +158,34 @@ A pipeline that knows more than a table can say may add, beside the records:
 | filter by group | a group column |
 | show 3D models, PDFs, deep zoom | `.glb` models, PDF files, an IIIF column |
 
-## 3. The pipeline
+## 4. The pipeline
 
 One writer, `src/collection/`, takes items, records, fields, facets, related sources, groups and vectors and writes the format. Every route goes through it:
 
 - `python -m src.ingest SOURCE --data-dir DIR`: reads the manifest, embeds the images, writes the collection. It continues where it stopped, as now, and writes the collection again at the end of each run.
 - `python -m src.collection build MANIFEST --vectors VECTORS --data-dir DIR`: for a pipeline with its own vectors.
 - `python -m src.collection convert DIR`: turns a collection in the old format into format 3, keeping its vectors as they are.
+- `python -m src.collection site DIR`: puts the collections a `site.json` lists together into one site.
 
-## 4. Existing collections
+## 5. Existing collections
 
 - si-oa bundles stay as they are. The next one is built by `src.collection build` from what smithsonian-search writes.
 - The Library of Congress maps are converted once. They then show each map's title and date as fields, filter by date, and search the titles.
 - The site keeps reading the old format for one release, warning that `src.collection convert` turns it into the new one, and then stops.
 - `catalog.sqlite`, from the unpublished branch `feature/catalog-search`, is never released. Its column rules, dates with decades and vocabulary move into the writer.
 
-## 5. Changes to smithsonian-search
+## 6. Changes to smithsonian-search
 
 It keeps everything about the Smithsonian: reading EDAN, units, rights, linking records to Flickr through Harvard LIL, embedding on EC2. It stops writing `metadata.sqlite` and instead writes the manifest: images, records, fields, facets, related sources, and its vectors, then calls `src.collection build`. `dce_bundle.py` shrinks to that.
 
-## 6. Documentation
+## 7. Documentation
 
 - A "Collection format" page replaces "Collections split into groups": the folder, `index_info.json` and every table, with what each powers.
+- A "Sites of several collections" page: `site.json`, what moves from `collection.json`, the shared model, and how ids change.
 - A "Mapping your data" page: the manifest, the column table above, what each part of the site needs, and worked examples: a spreadsheet catalog, a Dublin Core export, IIIF manifests, an export from a museum's collection system, and Smithsonian EDAN as the full case.
 - Indexing, search and describing a collection, and the setup skill, point to these two pages.
 
-## 7. Phases
+## 8. Phases
 
 Each phase is one branch that works on its own.
 
@@ -159,12 +193,16 @@ Each phase is one branch that works on its own.
 2. `src.ingest` writes format 3: records, fields, facets, search over the catalog and groups for every collection, and the profile uses the writer's rules.
 3. PDF pages, IIIF services and the three image modes in format 3, and the warning on the old format.
 4. `src.collection convert`, then the Library of Congress maps on format 3.
-5. `src.collection build`, then smithsonian-search writing the manifest for the next si-oa bundle.
-6. The two documentation pages, the skill and the website.
+5. Sites of several collections: `site.json`, `src.collection site`, the filter by collection, and each object's institution and license.
+6. `src.collection build`, then smithsonian-search writing the manifest for the next si-oa bundle.
+7. The documentation pages, the skill and the website.
 
-## 8. To decide
+## 9. To decide
 
 1. **Format number.** Writing 3 and reading 2 and 3 (recommended) keeps an older site from loading a collection it would show incompletely. Keeping 2 with optional columns lets an older site show such a collection without its PDFs and IIIF services.
 2. **Naming groups.** `group_id` now names an object, as `object_id` does, which collides with groups such as museums. Recommended: `group` names a group, and `group_id` keeps naming an object for old manifests, with a warning.
 3. **Fields on the page.** Every catalog column that is not technical (recommended), or only the columns the table above knows.
 4. **When the old format stops being read**: one release after the converter (recommended), or never.
+5. **Putting collections together.** Built into one index by `src.collection site` (recommended): one ranking, the catalog of every collection scored as one, and a site that serves one index as now. Or each collection loaded by the site as it starts: nothing to build, but catalog scores from different collections are hard to compare and every start takes longer.
+6. **The filter.** Two levels, collections and then the groups within one (recommended), or one list of every group of every collection.
+7. **Where a site lives.** `data/sites/<name>/` beside `data/collections/` (recommended), or a site file inside one of its collections.
