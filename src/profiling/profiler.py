@@ -9,6 +9,14 @@ from collections import Counter, defaultdict
 from PIL import Image, ImageFile
 
 from src.backend.core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS, THUMBNAIL_KEYS
+from src.backend.services.catalog_fields import OBJECT_ID_KEYS
+from src.collection.catalog import (
+    SEARCHED_AS,
+    column_role,
+    group_id_warning,
+    kind_of,
+    read_catalog,
+)
 
 from .models import (
     Capabilities,
@@ -92,13 +100,14 @@ PROGRESS_EVERY_FILES = 20_000
 TYPE_SAMPLE_ROWS = 500
 DIR_SAMPLE_NAMES = 400
 MAX_FACET_VALUES = 200
-MIN_SEARCHABLE_TEXT_LENGTH = 12
+ROLE_SAMPLE_VALUES = 5000
+MAX_LISTED_GROUPS = 20
 MIN_EXIF_COVERAGE = 0.05
 MIN_DEPTH_COVERAGE = 0.5
 COLLAPSE_MEAN_ITEMS = 1.3
 COLLAPSE_MAX_ITEMS = 10
 
-GROUP_COLUMNS = ("record_id", "item_id", "object_id", "group_id")
+GROUP_COLUMN = "group"
 CAMERA_PREFIXES = re.compile(r"^(DSC|IMG|DSCN|PICT|CIMG)", re.I)
 UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
@@ -432,59 +441,49 @@ def directory_signals(
     return signals
 
 
-def catalog_field(column: str, values: list, group_column: str | None) -> FieldProfile:
+def catalog_field(column: str, values: list, object_column: str | None) -> FieldProfile:
     present = [v for v in values if v is not None and v != ""]
     distinct = len(set(map(str, present)))
-    kind = infer_type(present)
-    is_group = column == group_column
-    mean_length = (
-        statistics.fmean(len(str(v)) for v in present[:5000]) if present else 0
-    )
-    coverage = round(len(present) / max(1, len(values)), 4)
-    max_facets = max(50, len(values) * 0.01)
-
+    read_as, filtered_as = column_role(column, present[:ROLE_SAMPLE_VALUES])
     profile = FieldProfile(
         name=column,
-        type=kind,
+        type=infer_type(present),
         provenance=Provenance.CATALOG,
-        coverage=coverage,
+        coverage=round(len(present) / max(1, len(values)), 4),
         cardinality=distinct,
         sample_values=[str(v)[:60] for v in present[:3]],
-        searchable=(
-            kind == "string"
-            and distinct > 1
-            and not is_group
-            and mean_length > MIN_SEARCHABLE_TEXT_LENGTH
-        ),
-        facetable=(
-            kind in ("string", "bool")
-            and 1 < distinct <= max_facets
-            and coverage > 0.5
-            and not is_group
-        ),
+        searchable=read_as in SEARCHED_AS,
+        facetable=filtered_as is not None,
+        read_as=read_as,
+        filtered_as=filtered_as,
     )
-
-    if is_group:
+    if read_as == "object":
         profile.note = (
-            "Identifies the object. Used to group results, not to filter or search."
+            "The object each file shows. Files with the same value are shown together."
+            if column == object_column
+            else f"Left out, since {object_column} names each file's object."
         )
-    elif distinct == 1:
+    elif read_as == "group":
         profile.note = (
-            f"Only one value ({str(present[0])[:40]}), so filtering by it is pointless."
+            f"Splits the collection into {distinct} groups, each a choice of the group "
+            "filter."
         )
-    elif kind in ("number", "date"):
-        profile.facetable = True
-        profile.note = f"A {kind} field, usable as a range filter."
-    elif distinct > len(values) * 0.5:
-        profile.note = "Nearly unique per row. Good for search, not for filtering."
+    elif read_as is None:
+        profile.note = "Holds no catalog text, only numbers or addresses."
+    elif kind_of(column) is None:
+        profile.note = "Read as notes, since the site does not know this column name."
+    elif filtered_as and distinct == 1:
+        profile.note = f"Only one value ({str(present[0])[:40]}) to filter by."
     return profile
 
 
 def catalog_structure(
-    columns: list[str], rows: list[tuple], group_column: str
+    columns: list[str], rows: list[tuple], object_column: str
 ) -> Structure:
-    index = columns.index(group_column)
+    index = columns.index(object_column)
     group_sizes = list(Counter(str(row[index]) for row in rows if row[index]).values())
+    if not group_sizes:
+        return Structure(collapse_reason="No object level. Each image is one result.")
     mean, largest = statistics.fmean(group_sizes), max(group_sizes)
     collapse = mean > COLLAPSE_MEAN_ITEMS or largest > COLLAPSE_MAX_ITEMS
     reason = (
@@ -497,16 +496,42 @@ def catalog_structure(
     )
     return Structure(
         group_unit="record",
-        group_field=group_column,
+        group_field=object_column,
         items_per_group={
             "mean": round(mean, 2),
             "median": float(statistics.median(group_sizes)),
             "max": float(largest),
         },
-        orphan_items=sum(1 for row in rows if not row[index]),
         suggested_collapse=collapse,
         collapse_reason=reason,
     )
+
+
+def without_record(
+    columns: list[str], rows: list[tuple], object_column: str | None
+) -> int:
+    """How many files have neither an object id nor any catalog text, as the writer reads them"""
+    index = columns.index(object_column) if object_column else None
+    count = 0
+    for row in rows:
+        if index is not None and row[index] not in (None, ""):
+            continue
+        read = read_catalog(dict(zip(columns, row)))
+        if not (read.title or read.fields or read.source_url):
+            count += 1
+    return count
+
+
+def files_per_group(columns: list[str], rows: list[tuple]) -> tuple[str | None, dict]:
+    """The column that splits the collection into groups, and how many files each holds"""
+    column = next((c for c in columns if c.strip().lower() == GROUP_COLUMN), None)
+    if column is None:
+        return None, {}
+    index = columns.index(column)
+    counts = Counter(
+        str(row[index]).strip() for row in rows if row[index] not in (None, "")
+    )
+    return column, dict(counts.most_common(MAX_LISTED_GROUPS))
 
 
 def file_derived_fields(
@@ -525,11 +550,11 @@ def file_derived_fields(
                 type="date",
                 provenance=Provenance.FILE_DERIVED,
                 coverage=round(len(dates) / sampled, 3),
-                facetable=True,
                 sample_values=dates[:3],
                 note=f"When each picture was taken, read from EXIF in "
                 f"{deep['sampled']} sampled images{span}. For scanned or photographed "
-                f"objects this is the digitization date, not the date of the object.",
+                f"objects this is the digitization date, not the date of the object. "
+                f"The site does not use it.",
             )
         )
     else:
@@ -552,9 +577,9 @@ def file_derived_fields(
                 type="geo",
                 provenance=Provenance.FILE_DERIVED,
                 coverage=round(deep["exif_gps"] / sampled, 3),
-                facetable=True,
                 note="Where each picture was taken, read from EXIF GPS. For scanned "
-                "or photographed objects this is the studio, not the object's origin.",
+                "or photographed objects this is the studio, not the object's origin. "
+                "The site does not use it.",
             )
         )
     else:
@@ -575,9 +600,9 @@ def file_derived_fields(
                     provenance=Provenance.FILE_DERIVED,
                     coverage=1.0,
                     cardinality=signal.distinct,
-                    facetable=signal.distinct <= MAX_FACET_VALUES,
                     sample_values=signal.examples,
-                    note=f"Folder level {signal.depth + 1} looks like {role}.",
+                    note=f"Folder level {signal.depth + 1} looks like {role}. The site "
+                    f"does not use folder names; a manifest column could carry them.",
                 )
             )
     return fields
@@ -592,36 +617,53 @@ def infer_fields(
     catalog = source.catalog_rows()
     if catalog:
         columns, rows = catalog
-        group_column = next((c for c in columns if c.lower() in GROUP_COLUMNS), None)
+        lowered = {c.strip().lower(): c for c in columns}
+        object_column = next((lowered[k] for k in OBJECT_ID_KEYS if k in lowered), None)
         for index, column in enumerate(columns):
             fields.append(
-                catalog_field(column, [row[index] for row in rows], group_column)
+                catalog_field(column, [row[index] for row in rows], object_column)
             )
-        if group_column:
-            structure = catalog_structure(columns, rows, group_column)
+        if object_column:
+            structure = catalog_structure(columns, rows, object_column)
+        structure.orphan_items = without_record(columns, rows, object_column)
+        structure.group_column, structure.groups = files_per_group(columns, rows)
+        warning = group_id_warning(columns)
+        for f in fields:
+            if warning and f.name.strip().lower() == "group_id":
+                f.note = warning
 
     fields.extend(file_derived_fields(len(images), deep, signals))
-
-    if not any(f.searchable for f in fields):
-        fields.append(
-            FieldProfile(
-                name="filename",
-                provenance=Provenance.FILE_DERIVED,
-                coverage=1.0,
-                cardinality=len(images),
-                searchable=True,
-                note="No catalog titles. Text search falls back to file names.",
-            )
-        )
     return fields, structure
 
 
-def build_capabilities(fields: list[FieldProfile]) -> Capabilities:
+def build_capabilities(
+    fields: list[FieldProfile], structure: Structure
+) -> Capabilities:
     capability_names = {"capture_date": "date_range", "location": "geo_map"}
+    roles = {f.read_as for f in fields if f.provenance == Provenance.CATALOG}
+    searched = roles & set(SEARCHED_AS) - {"identifiers"}
     capabilities = Capabilities(
         available=["text_search", "image_search", "visual_similarity"],
-        facets=[f.name for f in fields if f.available and f.facetable],
+        facets=sorted({f.filtered_as for f in fields if f.filtered_as}),
     )
+    for capability, present in (
+        ("catalog_search", bool(searched)),
+        ("titles", "title" in roles),
+        ("links_back", "link" in roles),
+        ("objects", "object" in roles),
+        ("group_filter", len(structure.groups) > 1),
+    ):
+        if present:
+            capabilities.available.append(capability)
+    if not searched:
+        capabilities.unavailable.append(
+            Capability(
+                capability="catalog_search",
+                reason="There is no catalog text, so search works by appearance alone.",
+                remedy="Give a parquet manifest catalog columns such as title, "
+                "creator, date or description.",
+            )
+        )
     for f in fields:
         if not f.available:
             capabilities.unavailable.append(
@@ -795,7 +837,7 @@ def profile_collection(
         directory_signals=signals,
         fields=fields,
         structure=structure,
-        capabilities=build_capabilities(fields),
+        capabilities=build_capabilities(fields, structure),
         sizing=estimate_sizing(stats, deep["bandwidth_bps"], model_type),
         decisions=build_decisions(
             stats,

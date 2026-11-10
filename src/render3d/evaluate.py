@@ -8,8 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.backend.services.catalog_fields import object_id_from
-from src.backend.services.collection_store import load_grouped, load_single
+from src.backend.services.collection_store import load_grouped
 from src.backend.services.shape_index import (
     OBJECTS_FILE,
     SHAPE_DIR,
@@ -43,18 +42,12 @@ def shape_vectors(embeddings_dir: Path) -> dict[str, np.ndarray]:
 
 
 def appearance_vectors(embeddings_dir: Path, model_name: str) -> dict[str, np.ndarray]:
-    index = load_single(embeddings_dir)
-    if index is None:
-        index = load_grouped(embeddings_dir, model_name)
+    index = load_grouped(embeddings_dir, model_name)
     rows: dict[str, list[int]] = {}
     views: dict[str, list[int]] = {}
     for number, item_id in enumerate(index.item_ids):
         metadata = index.metadata.get(item_id, {})
-        object_id = (
-            metadata.get("object_id")
-            or object_id_from(metadata.get("catalog"))
-            or item_id
-        )
+        object_id = metadata.get("object_id") or item_id
         rows.setdefault(object_id, []).append(number)
         if metadata.get("view_orbit"):
             views.setdefault(object_id, []).append(number)

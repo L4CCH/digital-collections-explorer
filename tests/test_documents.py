@@ -1,5 +1,4 @@
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -9,9 +8,10 @@ from fastapi import HTTPException
 from PIL import Image, ImageDraw
 
 from src.backend.services.collection_service import CollectionService
+from src.backend.services.collection_store import load_grouped
 from src.backend.services.embedding_service import EmbeddingService
 from src.backend.services.site_pages import llms_txt
-from src.ingest.export import export_for_backend
+from src.ingest.export import write_from_state
 from src.ingest.pipeline import Options, make_item_id, run
 from src.ingest.state import IngestState
 from src.profiling.sources import LocalDirSource
@@ -71,14 +71,15 @@ def ingest(folder, data_dir):
 
 def exported(state, data_dir):
     embeddings_dir = data_dir / "embeddings"
-    export_for_backend(state, embeddings_dir, "clip", "test-model")
-    return json.loads((embeddings_dir / "metadata.json").read_text())
+    write_from_state(state, embeddings_dir, "clip", "test-model")
+    return load_grouped(embeddings_dir, "test-model")
 
 
 def test_each_page_of_a_pdf_is_indexed_as_an_image_of_one_document(folder, tmp_path):
     state, stats = ingest(folder, tmp_path)
     assert (stats.done, stats.failed) == (2, 1)
-    pages = [m for m in exported(state, tmp_path).values() if m["type"] == "pdf_page"]
+    index = exported(state, tmp_path)
+    pages = [m for m in index.metadata.values() if m["type"] == "pdf_page"]
     assert sorted(m["page"] for m in pages) == [1, 2, 3]
     for page in pages:
         assert page["pages"] == PAGES
@@ -151,14 +152,14 @@ def test_ingest_asks_for_the_pdf_reader_when_it_finds_only_pdfs(
 @pytest.fixture()
 def collection(folder, tmp_path):
     state, _ = ingest(folder, tmp_path)
-    metadata = exported(state, tmp_path)
+    index = exported(state, tmp_path)
     embeddings = EmbeddingService()
     embeddings.embeddings_dir = str(tmp_path / "embeddings")
-    embeddings.item_ids = list(metadata)
-    embeddings.metadata = metadata
-    embeddings.embeddings = torch.nn.functional.normalize(
-        torch.rand(len(metadata), VECTOR_SIZE), dim=-1
-    )
+    embeddings.item_ids = index.item_ids
+    embeddings.metadata = index.metadata
+    embeddings.embeddings = index.embeddings
+    embeddings.groups = index.groups
+    embeddings.group_of_row = index.group_of_row
     embeddings.is_loaded = True
     return CollectionService(embeddings)
 

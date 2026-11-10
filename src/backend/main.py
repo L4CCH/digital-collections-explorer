@@ -24,6 +24,7 @@ from .services.collection_service import DEFAULT_COLLECTION, collection_service
 from .services.embedding_service import embedding_service
 from .services.index_info import (
     describe_mismatch,
+    describe_old_layout,
     grouped_model,
     is_grouped,
     read_index_info,
@@ -38,7 +39,10 @@ logger = logging.getLogger(__name__)
 
 
 def index_problem():
-    """Return why the loaded index cannot be searched with the configured model"""
+    """Return why the collection cannot be served or searched with the configured model"""
+    old = describe_old_layout(embedding_service.embeddings_dir)
+    if old:
+        return old
     info = read_index_info(embedding_service.embeddings_dir)
     if is_grouped(info) and grouped_model(info, settings.model_name) is None:
         return describe_mismatch(

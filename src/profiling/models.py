@@ -24,6 +24,8 @@ class FieldProfile(BaseModel):
     distribution: dict[str, int] | None = None
     facetable: bool = False
     searchable: bool = False
+    read_as: str | None = None
+    filtered_as: str | None = None
     note: str = ""
     remedy: dict[str, Any] | None = None
 
@@ -54,6 +56,8 @@ class Structure(BaseModel):
     orphan_items: int = 0
     suggested_collapse: bool = False
     collapse_reason: str = ""
+    group_column: str | None = None
+    groups: dict[str, int] = Field(default_factory=dict)
 
 
 class Issue(BaseModel):

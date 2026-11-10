@@ -6,8 +6,8 @@ from typing import Any, Callable, Dict, List, Optional
 import torch
 
 from ..core.config import settings
-from .collection_store import load_grouped, load_single
-from .index_info import is_grouped, read_index_info
+from .collection_store import load_grouped
+from .index_info import describe_old_layout, is_grouped, read_index_info
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +25,19 @@ class EmbeddingService:
         self.is_loaded = False
 
     def load_embeddings(self) -> None:
-        """Load the index, whether it is a single index or split into groups"""
+        """Load the collection's vectors and what the site shows of each image"""
         if self.is_loaded:
             logger.info("Embeddings already loaded")
             return
 
         try:
-            if is_grouped(read_index_info(self.embeddings_dir)):
-                loaded = load_grouped(self.embeddings_dir, settings.model_name)
-            else:
-                loaded = load_single(self.embeddings_dir)
-            if loaded is None:
+            if not is_grouped(read_index_info(self.embeddings_dir)):
+                logger.error(
+                    describe_old_layout(self.embeddings_dir)
+                    or f"No collection found in {self.embeddings_dir}"
+                )
                 return
+            loaded = load_grouped(self.embeddings_dir, settings.model_name)
 
             self.embeddings = loaded.embeddings
             self.item_ids = loaded.item_ids

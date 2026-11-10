@@ -33,6 +33,7 @@ URL_COLUMN_GUESSES = ["image_url", "url", "path", "file", "uri"]
 SIZE_COLUMN_GUESSES = ["size_bytes", "size", "bytes", "filesize"]
 JPEG_MAGIC = b"\xff\xd8\xff"
 PNG_MAGIC = b"\x89PN"
+PDF_MAGIC = b"%PDF"
 
 # Bandwidth probe: whole files between 200 KB and 20 MB, since small reads measure latency.
 PROBE_MIN_BYTES = 200_000
@@ -319,20 +320,27 @@ class ParquetManifestSource(Source):
             "fetch_via": f"s3://{self.s3_bucket}" if self.s3_bucket else None,
         }
 
-    def _address(self, row: dict) -> str:
-        if self.url_column:
-            return str(row[self.url_column])
-        info = iiif_info_from({self.iiif_column: row[self.iiif_column]}) or ""
-        return f"{info.removesuffix('/info.json')}/full/max/0/default.jpg"
+    def _address(self, row: dict) -> tuple[str | None, bool]:
+        """Where a row's file is, and whether only its IIIF service names it"""
+        named = str(row.get(self.url_column) or "").strip() if self.url_column else ""
+        if named:
+            return named, False
+        if self.iiif_column:
+            info = iiif_info_from({self.iiif_column: row.get(self.iiif_column)})
+            if info:
+                return f"{info.removesuffix('/info.json')}/full/max/0/default.jpg", True
+        return None, False
 
     def iter_files(self):
         size_index = self.columns.index(self.size_column) if self.size_column else None
         for values in self._load():
             row = dict(zip(self.columns, values))
-            url = self._address(row)
+            url, named_by_service = self._address(row)
+            if url is None:
+                continue
             key = unquote(urlparse(url).path).lstrip("/") if "://" in url else url
             size = int(values[size_index] or 0) if size_index is not None else 0
-            extra = {"url": url, "row": row, "named_by_service": not self.url_column}
+            extra = {"url": url, "row": row, "named_by_service": named_by_service}
             yield classify(key, size, extra)
 
     def read_bytes(self, ref, limit=None):
@@ -347,7 +355,7 @@ class ParquetManifestSource(Source):
         url = ref.extra.get("url", "")
         if "://" not in url:
             return self._read_local(url, limit)
-        return self._read_http(url, limit)
+        return self._read_http(url, limit, ref.is_document)
 
     def _local_file(self, value: str) -> str | None:
         if "://" in value or not self.base_dir:
@@ -364,7 +372,9 @@ class ParquetManifestSource(Source):
         except OSError:
             return None
 
-    def _read_http(self, url: str, limit: int | None) -> bytes | None:
+    def _read_http(
+        self, url: str, limit: int | None, document: bool = False
+    ) -> bytes | None:
         if "://" not in url:
             return None
         fetched = fetch_web(url, limit)
@@ -375,7 +385,10 @@ class ParquetManifestSource(Source):
             JPEG_MAGIC,
             PNG_MAGIC,
         )
-        if not is_image:
+        is_pdf = document and (
+            content_type.startswith("application/pdf") or data[:4] == PDF_MAGIC
+        )
+        if not (is_image or is_pdf):
             returned = content_type.split(";")[0] or "an unknown type"
             self.fetch_note = (
                 f"The '{self.url_column or self.iiif_column}' column returns {returned}, "

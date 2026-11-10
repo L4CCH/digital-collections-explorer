@@ -10,11 +10,16 @@ import torch
 
 from src.backend.core.config import DeviceType, apply_data_dir, settings
 from src.backend.services.embedding_service_factory import create_embedding_service
-from src.backend.services.index_info import KNOWN_DIMENSIONS
+from src.backend.services.index_info import (
+    KNOWN_DIMENSIONS,
+    is_grouped,
+    read_index_info,
+)
+from src.collection.catalog import group_id_warning
 from src.profiling.sources import open_source
 
 from .documents import INSTALL_HINT, can_read_pdfs
-from .export import export_for_backend
+from .export import write_from_state
 from .pipeline import IMAGE_MODES, Options, clock, make_item_id, run
 from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
@@ -136,6 +141,7 @@ def measured_disk_bytes(embeddings_dir: Path) -> dict:
 
 def summary(state: IngestState, embeddings_dir: Path, data_dir: str | None) -> dict:
     counts = state.counts()
+    written = state.fact("collection")
     return {
         "embeddings_dir": str(embeddings_dir),
         "indexed": counts.get("done", 0),
@@ -143,6 +149,7 @@ def summary(state: IngestState, embeddings_dir: Path, data_dir: str | None) -> d
         "skipped": counts.get("skipped", 0),
         "failed": counts.get("failed", 0),
         "images": state.fact("images") or "copy",
+        "collection": json.loads(written) if written else None,
         "disk_bytes_measured": measured_disk_bytes(embeddings_dir),
         "run": run_report(state),
         "problems": [
@@ -163,9 +170,11 @@ def readable_files(refs: list) -> tuple[list, str | None]:
 
 
 def foreign_index_exists(embeddings_dir: Path) -> bool:
-    return (embeddings_dir / "embeddings.pt").exists() and not (
-        embeddings_dir / STATE_FILE
-    ).exists()
+    written = (
+        is_grouped(read_index_info(embeddings_dir))
+        or (embeddings_dir / "embeddings.pt").exists()
+    )
+    return written and not (embeddings_dir / STATE_FILE).exists()
 
 
 def main() -> int:
@@ -226,6 +235,10 @@ def main() -> int:
     )
     if args.limit:
         refs = refs[: args.limit]
+    catalog = source.catalog_rows()
+    warning = group_id_warning(catalog[0]) if catalog else None
+    if warning:
+        print(f"Note: {warning}")
     if not refs:
         print("No images found.")
         state.close()
@@ -294,10 +307,14 @@ def main() -> int:
         for status, error, count in state.problems():
             print(f"  {status:<8} {count:>6,}  {error}")
 
-    exported = export_for_backend(
+    written = write_from_state(
         state, embeddings_dir, settings.model_type.value, settings.model_name
     )
-    print(f"Wrote {exported:,} embeddings to {embeddings_dir}\n")
+    if written:
+        state.remember("collection", json.dumps(written))
+        print(f"Wrote the collection to {embeddings_dir}\n")
+    else:
+        print("Nothing was indexed, so no collection was written.\n")
     print(render_report(summary(state, embeddings_dir, args.data_dir)))
     print(f"Start the search server with: {serve_command(args.data_dir)}")
     if args.json_path:

@@ -1,5 +1,6 @@
 """Pick out the catalog fields the site relies on, whatever the collection calls them."""
 
+import math
 import re
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -14,8 +15,6 @@ MODEL_EXTENSIONS = (".glb", ".gltf")
 
 VIEW_ORBIT_KEY = "view_orbit"
 
-IIIF_KEYS_SET = set(IIIF_KEYS)
-
 IIIF_IMAGE_REQUEST = re.compile(
     r"/(full|square|pct:[^/]+|\d+,\d+,\d+,\d+)/[^/]+/!?\d+(\.\d+)?"
     r"/(default|color|colour|gray|grey|bitonal|native)\.\w+$",
@@ -25,10 +24,13 @@ IIIF_IMAGE_REQUEST = re.compile(
 
 def object_id_from(catalog: Optional[Dict[str, Any]]) -> Optional[str]:
     """Return the id of the object this image belongs to, if the catalog has one"""
+    named = {str(key).strip().lower(): value for key, value in (catalog or {}).items()}
     for key in OBJECT_ID_KEYS:
-        value = (catalog or {}).get(key)
-        if value not in (None, ""):
-            return str(value)
+        value = named.get(key)
+        if isinstance(value, float) and math.isnan(value):
+            continue
+        if value not in (None, "") and str(value).strip():
+            return str(value).strip()
     return None
 
 
@@ -91,7 +93,7 @@ def is_web_address(value: Any) -> bool:
 def image_source(metadata: Dict[str, Any], size: str) -> Optional[str]:
     """Where an image is kept at a size, on this site or at a web address"""
     paths = metadata.get("paths") or {}
-    info = metadata.get("iiif") or iiif_info_from(metadata.get("catalog"))
+    info = metadata.get("iiif")
     service = info.removesuffix("/info.json") if is_web_address(info) else None
 
     def from_service(name: str) -> Optional[str]:
@@ -116,8 +118,6 @@ def image_hosts(metadata: Dict[str, Any]) -> set:
     """The servers other than this site that a browser loads this image from"""
     paths = metadata.get("paths") or {}
     kept = [paths.get("thumbnail"), paths.get("processed"), metadata.get("iiif")]
-    if not metadata.get("iiif") and IIIF_KEYS_SET & set(metadata.get("catalog") or {}):
-        kept.append(iiif_info_from(metadata.get("catalog")))
     return {origin_of(place) for place in kept if is_web_address(place)}
 
 

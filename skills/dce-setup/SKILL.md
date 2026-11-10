@@ -73,7 +73,10 @@ $PY -m src.profiling manifest.parquet --json /tmp/profile.json
 Use `--anonymous` for a public bucket, and leave it off when
 `aws_credentials_found` is true and the bucket is private. A manifest names each
 image in a column such as `image_url`, or only by its IIIF service in a column
-such as `iiif`, with any catalog fields beside it. Read the printed report and
+such as `iiif`, with any catalog fields beside it, and a `group` column when
+the site holds several institutions or museums. [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/)
+lists the columns the site reads and shows how to make a manifest from a
+spreadsheet, a collection system's export or IIIF manifests. Read the printed report and
 `/tmp/profile.json`.
 
 **If the report warns that image files could not be read**, fix that first. The
@@ -101,12 +104,11 @@ A few short paragraphs, leading with whatever would surprise them most:
    unexpected such as images with no catalog record or damaged files. Catalog
    columns in a manifest are used. A spreadsheet lying next to the images is
    not read yet: say so, and mention it if it looks empty.
-2. What they will be able to do: search by description and by example image,
-   with titles and links back to the catalog where the manifest has them. A
-   collection indexed here has one filter, "With catalog records only". The
-   profile's "filter" and "text search" labels say what the data could support,
-   not what this site offers: searching the catalog text, and filters by group,
-   date, place or subject, need a collection prepared by its own pipeline.
+2. What they will be able to do: the report's "The site will" list, which
+   follows the rules the site itself uses. "What the site does with each
+   column" says how each column is read. A column whose name the site does not
+   know is read as notes; renamed, such as `made_by` to `creator`, it becomes a
+   name to search and filter by.
 3. What they will not be able to do, why, and what would change that.
 4. What it will cost: time, disk space, and whether this machine can handle it.
    Compare `sizing` with `free_disk_bytes` and `memory_bytes`. Its disk estimate
@@ -205,7 +207,10 @@ Without a `collection.json` in `data/collections/NAME/`, the site shows a
 generic title and no suggested searches. Write one with the person from
 `collection.example.json`: a title, one or two sentences of introduction, the
 institution, the license, and six to eight searches you have run and that return
-good results. The site reads it on every visit, so no restart is needed.
+good results. With a `group` column, add `groups`, giving each group its
+`label`, `institution` and `license`; an object's page shows its group's
+([Collection format](https://l4cch.github.io/dce-website/docs/collection-format/#several-institutions-in-one-site)).
+The site reads it on every visit, so no restart is needed.
 
 ## Step 7. Tell the person how it went
 
@@ -220,9 +225,9 @@ From the ingest summary and nothing else:
    AWS, what `deploy/aws/status.sh NAME` reports, passing on any WARNING about a
    large machine still running first.
 
-Give them the address and two or three searches suited to the collection. For a
-collection indexed here, search reads the images themselves, so describing what
-a picture looks like works better than catalog terms.
+Give them the address and two or three searches suited to the collection:
+a description of what a picture shows and, where there is a catalog, a name or
+a date from it.
 
 ## More
 
@@ -232,6 +237,6 @@ a picture looks like works better than catalog terms.
   [references/deploy.md](references/deploy.md).
 
 Be honest about what is not built yet: one-step publishing to Hugging Face
-Spaces or to a cloud other than AWS (any Linux machine works), and search over
-catalog text or filters by group, date, place or subject for a collection
-indexed here, which need a collection prepared by its own pipeline.
+Spaces or to a cloud other than AWS (any Linux machine works), and a catalog
+kept apart from the manifest, in a second table or a spreadsheet beside the
+images: its columns have to be in the manifest itself.

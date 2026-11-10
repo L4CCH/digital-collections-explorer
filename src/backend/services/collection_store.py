@@ -1,4 +1,4 @@
-"""Reads a collection's index from disk, whether it is one index or split into groups."""
+"""Reads a collection from its vectors, one shard per group, and its metadata.sqlite."""
 
 import json
 import logging
@@ -19,12 +19,16 @@ VECTORS_DIR = "vectors"
 
 ITEMS_QUERY = """
     SELECT i.id, i.group_id, i.record_id, i.file_name, i.width, i.height,
-           i.thumbnail, i.processed, i.original, r.title, r.source_url,
-           {view_orbit}, {model_url}
+           i.thumbnail, i.processed, i.original, r.title, r.source_url, {optional}
     FROM items i LEFT JOIN records r ON r.record_id = i.record_id
 """
+OPTIONAL_COLUMNS = {
+    "items": ("view_orbit", "iiif", "page"),
+    "records": ("model_url", "document", "pages"),
+}
 FIELDS_QUERY = (
-    "SELECT label, value FROM record_fields WHERE record_id = ? ORDER BY position"
+    "SELECT {field}, label, value FROM record_fields WHERE record_id = ? "
+    "ORDER BY position"
 )
 FACETS_QUERY = (
     "SELECT facet, value FROM record_facets WHERE record_id = ? ORDER BY facet, value"
@@ -51,50 +55,6 @@ class LoadedIndex:
     metadata: Dict[str, Dict[str, Any]]
     groups: List[Dict[str, Any]] = field(default_factory=list)
     group_of_row: Optional[torch.Tensor] = None
-
-
-def load_single(embeddings_dir: Path) -> Optional[LoadedIndex]:
-    """Load embeddings.pt, item_ids.pt and metadata.json, the layout ingest writes"""
-    embeddings_path = embeddings_dir / "embeddings.pt"
-    item_ids_path = embeddings_dir / "item_ids.pt"
-    metadata_path = embeddings_dir / "metadata.json"
-
-    logger.info(f"Looking for embeddings at {embeddings_path}")
-    logger.info(f"Looking for item IDs at {item_ids_path}")
-    logger.info(f"Looking for metadata at {metadata_path}")
-
-    if not (embeddings_path.exists() and item_ids_path.exists()):
-        if not embeddings_path.exists():
-            logger.error(f"Embeddings file not found at {embeddings_path}")
-        if not item_ids_path.exists():
-            logger.error(f"Item IDs file not found at {item_ids_path}")
-        return None
-
-    embeddings = torch.load(embeddings_path, map_location="cpu")
-    item_ids = torch.load(item_ids_path)
-    if metadata_path.exists():
-        with open(metadata_path, "r") as f:
-            metadata = upgrade_old_pages(json.load(f))
-    else:
-        metadata = {}
-        logger.warning("Metadata file not found, proceeding without metadata.")
-    return LoadedIndex(embeddings, item_ids, metadata)
-
-
-def upgrade_old_pages(metadata: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Give PDF pages from indexes made before version 2 the fields pages have now"""
-    for item in metadata.values():
-        if item.get("type") != "pdf_page" or "document_key" in item:
-            continue
-        if "n_pages" not in item:
-            continue
-        original = (item.get("paths") or {}).get("original")
-        item["document_key"] = original or item.get("file_name")
-        item["pages"] = item["n_pages"]
-        item["page"] = int(item.get("page") or 0) + 1
-        if original:
-            item.setdefault("document", original)
-    return metadata
 
 
 def load_grouped(embeddings_dir: Path, model_name: str) -> LoadedIndex:
@@ -137,18 +97,20 @@ def load_grouped(embeddings_dir: Path, model_name: str) -> LoadedIndex:
 
 
 def read_grouped_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
-    """Describe every image from the items and records tables of metadata.sqlite"""
+    """Describe every image, page and view from the items and records of metadata.sqlite"""
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        query = ITEMS_QUERY.format(
-            view_orbit=(
-                "i.view_orbit" if "view_orbit" in columns(con, "items") else "NULL"
-            ),
-            model_url=(
-                "r.model_url" if "model_url" in columns(con, "records") else "NULL"
-            ),
+        optional = [
+            f"{table[0]}.{name}" if name in columns(con, table) else "NULL"
+            for table, names in OPTIONAL_COLUMNS.items()
+            for name in names
+        ]
+        rows = con.execute(ITEMS_QUERY.format(optional=", ".join(optional))).fetchall()
+        with_fields = (
+            {r for (r,) in con.execute("SELECT DISTINCT record_id FROM record_fields")}
+            if "record_id" in columns(con, "record_fields")
+            else set()
         )
-        rows = con.execute(query).fetchall()
     finally:
         con.close()
     metadata = {}
@@ -165,21 +127,34 @@ def read_grouped_metadata(path: Path) -> Dict[str, Dict[str, Any]]:
         title,
         source_url,
         view_orbit,
+        iiif,
+        page,
         model_url,
+        document,
+        pages,
     ) in rows:
         paths = {"thumbnail": thumbnail, "processed": processed, "original": original}
+        is_page = page is not None
         described = {
             "file_name": file_name,
-            "type": "image",
+            "type": "pdf_page" if is_page else "image",
             "width": width,
             "height": height,
             "title": title,
             "source_url": source_url,
             "object_id": record_id,
+            "cataloged": bool(
+                record_id and (title or source_url or record_id in with_fields)
+            ),
             "group": group_id,
             "paths": {k: v for k, v in paths.items() if v},
             "model_url": model_url,
             "view_orbit": view_orbit,
+            "iiif": iiif,
+            "page": page,
+            "pages": pages if is_page else None,
+            "document": document if is_page else None,
+            "document_key": record_id if is_page else None,
         }
         metadata[item_id] = {k: v for k, v in described.items() if v is not None}
     return metadata
@@ -251,9 +226,12 @@ def read_record_details(path: Path, record_id: str) -> Dict[str, Any]:
             )
         }
         if "record_fields" in tables:
+            named = "field" if "field" in columns(con, "record_fields") else "NULL"
             fields = [
-                {"label": label, "value": value}
-                for label, value in con.execute(FIELDS_QUERY, (record_id,))
+                {"field": field, "label": label, "value": value}
+                for field, label, value in con.execute(
+                    FIELDS_QUERY.format(field=named), (record_id,)
+                )
             ]
         if "record_facets" in tables:
             for facet, value in con.execute(FACETS_QUERY, (record_id,)):

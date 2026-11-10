@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15744570.svg)](https://doi.org/10.5281/zenodo.15744570) [![Paper](https://img.shields.io/badge/paper-Computational%20Humanities%20Research-blue.svg)](https://doi.org/10.1017/chr.2025.10017) [![arXiv](https://img.shields.io/badge/arXiv-2507.00961-b31b1b.svg)](https://arxiv.org/abs/2507.00961)
 
-**Digital Collections Explorer is an open-source search site for image collections that have little or no metadata.** A library, archive or museum points it at a folder, an S3 bucket or a manifest of images. Visitors can then search the collection in plain language ("a steam locomotive", "a handwritten letter with a red seal"), search with a picture, wander through it, and follow every image back to the institution's own record. No catalog, tags or OCR are needed, and where a catalog exists, search reads its records too.
+**Digital Collections Explorer is an open-source search site for digital collections, with or without a catalog.** A gallery, library, archive or museum points it at a folder, an S3 bucket or a manifest of images and their catalog. Visitors can then search the collection in plain language ("a steam locomotive", "a handwritten letter with a red seal"), search with a picture, wander through it, and follow every image back to the institution's own record. No catalog, tags or OCR are needed, and where a catalog exists, search reads its records too.
 
 The [project site](https://l4cch.github.io/dce-website/) has the documentation and the collections searched with it, among them the [maps of the Library of Congress](https://digital-collections-explorer.com/) from our paper. The project started at the [Lab for Computing Cultural Heritage](https://l4cch.github.io/lab-website/) at the University of Washington Information School, is developed in the open with contributors from other institutions, and is described in [our paper in *Computational Humanities Research*](https://doi.org/10.1017/chr.2025.10017).
 
@@ -13,7 +13,8 @@ The [project site](https://l4cch.github.io/dce-website/) has the documentation a
 - **Searches by meaning.** Natural-language queries and reverse image search over photographs, maps, PDFs and 3D models, together in one site.
 - **Installs only what a collection needs.** Photos and other images are always shown. 3D models, PDFs and deep zoom into IIIF images are options, so a site without 3D models never installs the 3D viewer.
 - **Shows 3D models and PDFs.** An object with a `.glb` model can be turned and zoomed on its page, views drawn from the model join the search, and objects of similar shape can be found. A PDF is searched page by page and opens at the page found.
-- **Needs no metadata, and uses it when it exists.** A catalog groups images into objects, links each one to its record, and makes the records searchable beside the pictures.
+- **Works without metadata, and uses the catalog it is given.** A catalog groups images into objects, shows each record's fields, makes the records searchable beside the pictures, and lets visitors filter by date, place, kind of object, culture, subject and name.
+- **Holds several institutions in one site.** A `group` column splits a collection into museums or libraries, each keeping its own name and license, searched together or apart.
 - **Scales on ordinary hardware.** Indexing reads from disk, S3 or a manifest without copying the originals, and serving needs no GPU.
 - **Is safe to put online.** Rate, upload and concurrency limits protect a small machine, and every refusal is explained in plain words.
 - **Can be searched by AI assistants.** An optional MCP server lets Claude, ChatGPT and other assistants search the collection and link back to it.
@@ -68,7 +69,8 @@ The [documentation](https://l4cch.github.io/dce-website/docs/) covers:
 - [Indexing large or remote collections](https://l4cch.github.io/dce-website/docs/indexing/)
 - [Kinds of material: 3D models, PDFs and deep zoom](https://l4cch.github.io/dce-website/docs/kinds-of-material/)
 - [Describing a collection to visitors](https://l4cch.github.io/dce-website/docs/describing-a-collection/)
-- [Collections split into groups](https://l4cch.github.io/dce-website/docs/groups/)
+- [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/): from a spreadsheet, a collection system or IIIF manifests to the manifest
+- [Collection format](https://l4cch.github.io/dce-website/docs/collection-format/): the folder a site serves, and several institutions in one site
 - [Searching by appearance and by catalog](https://l4cch.github.io/dce-website/docs/search/)
 - [Models: SigLIP, SigLIP 2 and CLIP](https://l4cch.github.io/dce-website/docs/models/)
 - [Limits that protect a public site](https://l4cch.github.io/dce-website/docs/limits/)

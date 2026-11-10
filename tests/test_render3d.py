@@ -5,11 +5,11 @@ import struct
 
 import numpy as np
 import pytest
-import torch
 from PIL import Image
 
 from src.backend.core.config import settings
 from src.backend.services.shape_index import write_shape_index
+from src.collection import writer
 from src.render3d import __main__ as render3d
 from src.render3d.evaluate import compare, evaluate, read_pairs, render_comparison
 from src.render3d.models import Model
@@ -58,10 +58,23 @@ def test_shape_and_appearance_are_compared_on_the_same_objects(tmp_path):
         "c-photo": {"object_id": "c"},
         "d-0": {"object_id": "d", "view_orbit": "0deg 75deg auto"},
     }
-    vectors = torch.tensor([[1.0, 0.0], [0.8, 0.2], [0.9, 0.1], [0.0, 1.0], [0.1, 0.9]])
-    torch.save(vectors, embeddings_dir / "embeddings.pt")
-    torch.save(item_ids, embeddings_dir / "item_ids.pt")
-    (embeddings_dir / "metadata.json").write_text(json.dumps(metadata))
+    vectors = np.array([[1.0, 0.0], [0.8, 0.2], [0.9, 0.1], [0.0, 1.0], [0.1, 0.9]])
+    writer.write_collection(
+        embeddings_dir,
+        [writer.Model("siglip", "siglip", "fake/siglip", 2)],
+        [writer.Group("collection", "collection")],
+        [
+            writer.Item(
+                i,
+                "collection",
+                metadata[i]["object_id"],
+                view_orbit=metadata[i].get("view_orbit"),
+            )
+            for i in item_ids
+        ],
+        [],
+        {"siglip": (item_ids, vectors)},
+    )
     write_shape_index(
         embeddings_dir,
         ["a", "b", "d"],

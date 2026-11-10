@@ -55,15 +55,17 @@ def test_a_folder_with_pdfs_asks_for_the_pdf_option(profile):
     assert not any(".pdf" in issue.note for issue in profile.scan.issues)
 
 
-def test_exif_dates_become_a_file_derived_filter(profile):
+def test_exif_dates_are_reported_but_not_offered_as_a_filter(profile):
     date = profile.field("capture_date")
-    assert date.available and date.facetable and date.coverage > 0.5
+    assert date.available and date.coverage > 0.5 and not date.facetable
     assert date.provenance.value == "file_derived"
+    assert "The site does not use it." in date.note
+    assert profile.capabilities.facets == []
 
 
-def test_year_folders_become_a_filter(profile):
+def test_year_folders_are_noticed_but_not_offered_as_a_filter(profile):
     folder = profile.field("folder_level_1")
-    assert folder is not None and folder.facetable
+    assert folder is not None and not folder.facetable
 
 
 def test_missing_capabilities_always_explain_why(profile):
@@ -73,8 +75,14 @@ def test_missing_capabilities_always_explain_why(profile):
     assert all(c.reason for c in profile.capabilities.unavailable)
 
 
-def test_text_search_falls_back_to_file_names(profile):
-    assert profile.field("filename").searchable
+def test_without_a_catalog_search_works_by_appearance_alone(profile):
+    assert profile.field("filename") is None
+    assert "catalog_search" not in profile.capabilities.available
+    (missing,) = [
+        c for c in profile.capabilities.unavailable if c.capability == "catalog_search"
+    ]
+    assert missing.reason and missing.remedy
+    assert "x search the catalog text as well" in render(profile)
 
 
 def test_sizing_is_never_empty(profile):

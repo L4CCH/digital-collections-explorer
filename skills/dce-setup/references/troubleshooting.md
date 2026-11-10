@@ -2,9 +2,17 @@
 
 ## "already holds an index that this tool did not create"
 
-`ingest` found `embeddings.pt` in the target folder without its own state file.
-Someone built that index another way. Use a different `--data-dir`. Only pass
+`ingest` found a collection in the target folder, an `index_info.json` or an
+`embeddings.pt`, without its own state file. Someone built it another way. Use a different `--data-dir`. Only pass
 `--overwrite` when the person has explicitly said to replace that index.
+
+## "holds an index in the old layout"
+
+The collection was indexed by v2.0.0-beta.2 or earlier, into `embeddings.pt`,
+`item_ids.pt` and `metadata.json`, which the site no longer reads. If the folder has an `ingest_state.sqlite`, run the same `src.ingest`
+command again: every file is already indexed, so it only writes the collection
+anew. Otherwise it was built another way; serve it with v2.0.0-beta.2, or index
+its source again into a new `--data-dir`.
 
 ## "was built with ..." or "was indexed with ..., but config.json is now set to ..."
 

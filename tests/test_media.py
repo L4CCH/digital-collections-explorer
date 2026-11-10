@@ -16,7 +16,6 @@ from src.backend.services.catalog_fields import (
     servable_model,
 )
 from src.backend.services.collection_service import CollectionService
-from src.backend.services.collection_store import upgrade_old_pages
 from src.backend.services.embedding_service import EmbeddingService
 from src.environment import media_shown_by
 from src.profiling.models import FieldProfile, ScanStats
@@ -81,8 +80,8 @@ def test_a_record_that_names_an_iiif_service_can_be_zoomed(tmp_path):
     embeddings.embeddings_dir = str(tmp_path)
     embeddings.item_ids = ["map", "photo"]
     embeddings.metadata = {
-        "map": {"catalog": {"title": "Map", "iiif": SERVICE}},
-        "photo": {"catalog": {"title": "Photo"}},
+        "map": {"title": "Map", "iiif": f"{SERVICE}/info.json"},
+        "photo": {"title": "Photo"},
     }
     embeddings.embeddings = torch.nn.functional.normalize(torch.rand(2, 4), dim=-1)
     embeddings.is_loaded = True
@@ -120,7 +119,6 @@ def test_an_image_with_only_an_iiif_service_is_requested_from_it_at_each_size():
         "full": f"{SERVICE}/full/!1920,1920/0/default.jpg",
     }
     assert image_urls({"iiif": f"{SERVICE}/info.json"}) == expected
-    assert image_urls({"catalog": {"iiif_url": SERVICE}}) == expected
     assert image_source({"paths": {"processed": "processed/a.jpg"}}, "thumbnail") == (
         "processed/a.jpg"
     )
@@ -132,7 +130,7 @@ def test_results_say_where_a_browser_can_load_their_images(tmp_path):
     embeddings.embeddings_dir = str(tmp_path)
     embeddings.item_ids = ["map", "photo"]
     embeddings.metadata = {
-        "map": {"catalog": {"title": "Map", "iiif": SERVICE}},
+        "map": {"title": "Map", "iiif": f"{SERVICE}/info.json"},
         "photo": {"paths": {"thumbnail": "thumbnails/p.jpg"}},
     }
     embeddings.embeddings = torch.nn.functional.normalize(torch.rand(2, 4), dim=-1)
@@ -214,36 +212,14 @@ def collection_of(metadata, tmp_path, groups=None):
     return CollectionService(embeddings)
 
 
-def test_pages_from_an_index_made_before_version_2_are_one_pdf(tmp_path):
-    metadata = upgrade_old_pages(
-        {
-            f"old_{n}": {
-                "file_name": "report.pdf",
-                "type": "pdf_page",
-                "page": n,
-                "n_pages": 2,
-                "paths": {"original": "data/raw/report.pdf"},
-            }
-            for n in range(2)
-        }
-    )
-    metadata["photo"] = {"file_name": "a.jpg", "type": "image"}
-    collection = collection_of(metadata, tmp_path)
-    info = collection.info()
-    assert (info["documents"], info["images"], info["objects"]) == (1, 1, 2)
-    pages = collection.item("old_1")["photos"]
-    assert [p["metadata"]["page"] for p in pages] == [1, 2]
-    assert pages[0]["metadata"]["document"] == "data/raw/report.pdf"
-
-
 def model_object(tmp_path):
     record = {"object_id": "vase", "model_url": "/data/vase.glb"}
     view = {**record, "view_orbit": "0deg 75deg auto"}
     return collection_of(
         {
-            "view-1": {"catalog": view, "object_id": "vase", **view},
-            "photo": {"catalog": record, "object_id": "vase", **record},
-            "view-2": {"catalog": view, "object_id": "vase", **view},
+            "view-1": dict(view),
+            "photo": dict(record),
+            "view-2": dict(view),
         },
         tmp_path,
         groups=["museum", "museum", "museum"],

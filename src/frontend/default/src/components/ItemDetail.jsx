@@ -89,6 +89,10 @@ function ItemDetail({ id, collection, canGoBack }) {
     () => Object.fromEntries((collection?.groups || []).map((group) => [group.id, group.label])),
     [collection],
   );
+  const groupsById = useMemo(
+    () => new Map((collection?.groups || []).map((group) => [group.id, group])),
+    [collection],
+  );
   const current = showModel
     ? photos.find((photo) => photo.id === currentId) || photos[0]
     : stills.find((photo) => photo.id === currentId) || stills[0] || photos[0];
@@ -225,8 +229,10 @@ function ItemDetail({ id, collection, canGoBack }) {
   const name = plainText(title) || (isPage ? metadata.file_name : '');
   const sourceUrl = metadata.source_url;
   const unnamed = sourceUrl ? 'Untitled' : 'Uncataloged image';
-  const sourceName = collection?.source_name || (sourceUrl && hostnameOf(sourceUrl));
-  const license = collection?.license;
+  const group = groupsById.get(metadata.group);
+  const institution = group?.institution || collection?.institution || collection?.source_name;
+  const sourceName = institution || (sourceUrl && hostnameOf(sourceUrl));
+  const license = group?.license || collection?.license;
   const groupLabel = groupLabels[metadata.group];
   const hasSeveralEntries = entries.length > 1;
   const viewMetadata = photos.find((photo) => photo.id === viewId)?.metadata || {};

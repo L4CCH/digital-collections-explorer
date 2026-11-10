@@ -1,7 +1,7 @@
 {
   "title": "National Museum of American History",
   "description": "Wander through objects and photographs from the Smithsonian's National Museum of American History, or describe what you want to see.",
-  "source_name": "the Smithsonian",
+  "institution": "the Smithsonian",
   "example_queries": [
     "a patchwork quilt",
     "a military uniform",

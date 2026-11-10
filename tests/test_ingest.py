@@ -8,7 +8,8 @@ import pytest
 import torch
 from PIL import Image
 
-from src.ingest.export import export_for_backend
+from src.backend.services.collection_store import load_grouped
+from src.ingest.export import write_from_state
 from src.ingest.pipeline import ByteBudget, Options, make_item_id, run, sharded_path
 from src.ingest.state import IngestState
 from src.profiling.sources import LocalDirSource
@@ -65,30 +66,34 @@ def test_indexes_good_images_and_records_bad_ones(collection):
     assert status == "failed" and error.startswith("decode:") and count == 1
 
 
-def test_output_matches_what_the_backend_loads(collection):
+def test_output_is_a_collection_the_site_reads(collection):
     data_dir = tempfile.mkdtemp(prefix="dce_ingest_out_")
     state, _, _, _ = ingest(collection, data_dir)
     embeddings_dir = Path(data_dir) / "embeddings"
-    assert export_for_backend(state, embeddings_dir, "clip", "test-model") == 3
+    written = write_from_state(state, embeddings_dir, "clip", "test-model")
+    assert (written["items"], written["records"], written["groups"]) == (3, 0, 1)
     info = json.loads((embeddings_dir / "index_info.json").read_text())
-    assert info.pop("built_at").endswith("Z")
-    assert info == {
-        "model_type": "clip",
-        "model_name": "test-model",
-        "dimensions": VECTOR_SIZE,
-        "items": 3,
-    }
+    assert info["format"] == 3 and info["built_at"].endswith("Z")
+    assert info["models"] == [
+        {
+            "key": "clip",
+            "type": "clip",
+            "name": "test-model",
+            "revision": None,
+            "dimensions": VECTOR_SIZE,
+        }
+    ]
+    assert info["groups"] == [{"id": "collection", "label": "collection", "images": 3}]
 
-    embeddings = torch.load(embeddings_dir / "embeddings.pt")
-    item_ids = torch.load(embeddings_dir / "item_ids.pt")
-    metadata = json.loads((embeddings_dir / "metadata.json").read_text())
-    assert embeddings.shape == (3, VECTOR_SIZE)
-    assert np.allclose(embeddings.norm(dim=-1).numpy(), 1.0)
-    assert set(item_ids) == set(metadata)
-    for item in metadata.values():
-        assert item["type"] == "image"
+    index = load_grouped(embeddings_dir, "test-model")
+    assert index.embeddings.shape == (3, VECTOR_SIZE)
+    assert np.allclose(index.embeddings.norm(dim=-1).numpy(), 1.0)
+    assert set(index.item_ids) == set(index.metadata)
+    for item in index.metadata.values():
+        assert item["type"] == "image" and not item["cataloged"]
         for kind in ("original", "processed", "thumbnail"):
             assert os.path.exists(item["paths"][kind])
+    assert not (embeddings_dir / "embeddings.pt").exists()
 
 
 def test_same_file_name_in_two_folders_does_not_collide(collection):
