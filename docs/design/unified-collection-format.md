@@ -192,10 +192,11 @@ Each phase is one branch that works on its own.
 5. `src.collection build`, then smithsonian-search writing the manifest for the next si-oa bundle.
 6. The documentation pages, the skill and the website.
 
-## 9. To decide
+## 9. Decided
 
-1. **Format number.** Writing 3 and reading 2 and 3 (recommended) keeps an older site from loading a collection it would show incompletely. Keeping 2 with optional columns lets an older site show such a collection with blank images and without its PDFs.
-2. **Naming groups.** `group_id` now names an object, as `object_id` does, which collides with groups such as museums. Recommended: `group` names a group, and `group_id` keeps naming an object for old manifests, with a warning.
-3. **Fields on the page.** Every catalog column that is not technical (recommended), or only the columns the table above knows.
+On 2026-11-10:
 
-Decided: the old format is not read once the Library of Congress maps are moved (2026-11-10).
+1. **Format number.** New collections are written as format 3, and the site reads formats 2 and 3, so an older site does not load a collection it would show incompletely.
+2. **Naming groups.** `group` names a group, such as a museum. `group_id` keeps naming an object, as in old manifests, with a warning.
+3. **Fields on the page.** Every catalog column that is not technical, under its column name unless `collection.json` gives the column a label.
+4. **The old format** is not read once the Library of Congress maps are moved.
