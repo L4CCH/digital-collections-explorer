@@ -11,7 +11,7 @@ SI_PAGE = "https://n2t.net/ark:/65665/ng49ca746a6"
 
 
 def cataloged(record_id, title):
-    return {"catalog": {"record_id": record_id, "title": title, "guid": SI_PAGE}}
+    return {"object_id": record_id, "title": title, "source_url": SI_PAGE}
 
 
 @pytest.fixture()

@@ -11,14 +11,7 @@ from urllib.parse import urlparse
 import torch
 
 from ..core.config import settings
-from .catalog_fields import (
-    iiif_info_from,
-    image_hosts,
-    image_urls,
-    object_id_from,
-    servable_model,
-    source_url_from,
-)
+from .catalog_fields import image_hosts, image_urls, servable_model
 from .catalog_filter import can_filter
 from .collection_store import METADATA_DB, has_table, read_record_details
 from .embedding_service import EmbeddingService, embedding_service
@@ -76,9 +69,7 @@ class CollectionService:
         cataloged: List[bool] = []
         for index, item_id in enumerate(item_ids):
             metadata = (self.embeddings.metadata or {}).get(item_id, {})
-            record = metadata.get("object_id") or object_id_from(
-                metadata.get("catalog")
-            )
+            record = metadata.get("object_id")
             object_id = record or metadata.get("document_key") or item_id
             self.position[item_id] = index
             self.object_ids.append(object_id)
@@ -300,13 +291,8 @@ class CollectionService:
         """Describe one image the way the site shows it"""
         item_id = self.embeddings.item_ids[index]
         metadata = dict(self._metadata(index))
-        catalog = metadata.get("catalog")
-        metadata.setdefault("title", (catalog or {}).get("title"))
-        metadata.setdefault("source_url", source_url_from(catalog))
-        if "iiif" not in metadata:
-            iiif = iiif_info_from(catalog)
-            if iiif:
-                metadata["iiif"] = iiif
+        metadata.setdefault("title", None)
+        metadata.setdefault("source_url", None)
         urls = image_urls(metadata)
         if urls:
             metadata["image_urls"] = urls

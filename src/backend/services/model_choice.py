@@ -16,7 +16,7 @@ def choose_model(settings) -> None:
     DCE_MODEL picks one of the index's models by key or name. Without it the index's
     default_model is used, then the model in config.json if the index holds it.
     The revision recorded in the index is loaded, so queries and stored vectors come
-    from the same weights. Single indexes keep the model in config.json.
+    from the same weights. Without a collection, the model in config.json is kept.
     """
     info = read_index_info(Path(settings.embeddings_dir))
     if not is_grouped(info):

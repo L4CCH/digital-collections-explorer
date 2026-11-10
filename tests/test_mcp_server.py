@@ -340,9 +340,6 @@ def test_the_servers_that_keep_an_image_are_known():
             "iiif": "https://tile.loc.gov/iiif/a/info.json",
         }
     ) == {"https://tile.loc.gov"}
-    assert image_hosts({"catalog": {"iiif_url": "https://iiif.example.org/b"}}) == {
-        "https://iiif.example.org"
-    }
     assert image_hosts({"paths": {"thumbnail": "thumbnails/a.jpg"}}) == set()
 
 

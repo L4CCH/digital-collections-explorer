@@ -1,6 +1,6 @@
 # One collection format, one pipeline
 
-Status: decided 2026-11-10. Phases 1 and 2 are built; phase 2 took in phase 3.
+Status: decided 2026-11-10. Phases 1, 2 and 4 are built; phase 2 took in phase 3.
 
 ## Why
 
@@ -23,7 +23,7 @@ The split was half right. Reading a source, such as Smithsonian EDAN records, it
 - Every collection is stored in one format, whether DCE indexed it or a pipeline prepared it.
 - DCE has the only code that writes that format, used by `src.ingest` and by any pipeline.
 - Whatever a source holds reaches the site through one documented manifest, and the profile says what the data supports before indexing.
-- si-oa bundles keep working as they are. The old format is not read any more: only the Library of Congress maps still use it, and they are written again in the new one.
+- si-oa bundles keep working as they are. The old format is not read any more: only the Library of Congress maps used it, and they stay on v2.0.0-beta.2.
 - One site can search the collections of several institutions together, each keeping its own name and license.
 
 Not goals: reading particular catalog systems inside DCE, editing records on a running site.
@@ -168,9 +168,9 @@ One writer, `src/collection/`, takes items, records, fields, facets, related sou
 ## 5. Existing collections
 
 - si-oa bundles stay as they are. The next one is built by `src.collection build` from what smithsonian-search writes.
-- The Library of Congress maps are written again in format 3 by `scripts/create_loc_assets.py`, through the writer, from the same vectors. They then show each map's title and date as fields, filter by date, and search the titles.
+- The Library of Congress maps, the demonstration of the published paper, stay on v2.0.0-beta.2, the last version that reads the old format, so their search stays as the paper describes it: by appearance alone, with the same CLIP vectors. `scripts/create_loc_assets.py` and `scripts/fetch_loc_titles.py`, which write their data, are kept in that tag.
 - A collection indexed by an earlier version of DCE is written again in format 3 by running the same `src.ingest` command: the vectors it computed are kept in its `state.sqlite`, so nothing is embedded again.
-- The site stops reading the old format, `embeddings.pt`, `item_ids.pt` and `metadata.json`, once the Library of Congress maps are moved, and the code that reads it goes.
+- The site does not read the old format, `embeddings.pt`, `item_ids.pt` and `metadata.json`, after v2.0.0-beta.2. Given one, it refuses to start and says what to do.
 - `catalog.sqlite`, from the unpublished branch `feature/catalog-search`, is never released. Its column rules, dates with decades and vocabulary move into the writer.
 
 ## 6. Changes to smithsonian-search
@@ -191,7 +191,7 @@ Each phase is one branch that works on its own.
 1. The writer and format 3, with the site reading formats 2 and 3, and tests that a si-oa bundle reads as before.
 2. `src.ingest` writes format 3: records, fields, facets, search over the catalog and groups for every collection, each group's institution and license on the object's page, and the profile uses the writer's rules.
 3. PDF pages, IIIF services and the three image modes in format 3. Done in phase 2, since ingest writes them and nothing indexed here would otherwise show its PDFs and IIIF images.
-4. The Library of Congress maps in format 3, then the old format's reader removed.
+4. The old format's reader removed. The Library of Congress maps stay on v2.0.0-beta.2 instead of moving to format 3, so that they keep the search the paper describes.
 5. `src.collection build`, then smithsonian-search writing the manifest for the next si-oa bundle.
 6. The documentation pages, the skill and the website.
 
@@ -202,4 +202,4 @@ On 2026-11-10:
 1. **Format number.** New collections are written as format 3, and the site reads formats 2 and 3, so an older site does not load a collection it would show incompletely.
 2. **Naming groups.** `group` names a group, such as a museum. `group_id` keeps naming an object, as in old manifests, with a warning.
 3. **Fields on the page.** Every catalog column that is not technical, under its column name unless `collection.json` gives the column a label.
-4. **The old format** is not read once the Library of Congress maps are moved.
+4. **The old format** is not read after v2.0.0-beta.2, and the Library of Congress maps stay on that version (decided 2026-11-10).
