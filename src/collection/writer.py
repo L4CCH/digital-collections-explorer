@@ -113,6 +113,7 @@ class Model:
     name: str
     dimensions: int
     revision: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -409,6 +410,7 @@ def write_collection(
                 "name": m.name,
                 "revision": m.revision,
                 "dimensions": m.dimensions,
+                **m.details,
             }
             for m in models
         ],

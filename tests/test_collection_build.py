@@ -195,6 +195,7 @@ def test_a_manifest_is_written_as_format_3_with_every_model_and_group(built):
     info = json.loads((data_dir / "embeddings" / "index_info.json").read_text())
     assert info["format"] == 3 and info["default_model"] == "fake"
     assert [m["key"] for m in info["models"]] == ["fake", "other"]
+    assert info["models"][0]["preprocess"] == "p1"
     assert info["groups"] == [
         {"id": "east", "label": "East Wing", "images": 3},
         {"id": "west", "label": "West Wing", "images": 2},

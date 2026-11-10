@@ -16,6 +16,7 @@ from .catalog import SEARCHED, read_catalog
 from .writer import Group, Item, Model, Record, Related, write_collection
 
 MODELS_FILE = "models.json"
+MODEL_KEYS = ("key", "type", "name", "dimensions", "revision")
 SOURCE_FILE = "source.json"
 REQUIRED = {
     "files": ("id",),
@@ -105,6 +106,7 @@ def read_vectors(folder: Path) -> tuple[list[Model], str | None, dict, dict[str,
             name=m["name"],
             dimensions=int(m["dimensions"]),
             revision=m.get("revision"),
+            details={k: v for k, v in m.items() if k not in MODEL_KEYS},
         )
         for m in described.get("models") or []
     ]
