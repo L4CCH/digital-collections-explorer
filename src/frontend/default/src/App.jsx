@@ -20,6 +20,8 @@ const RESULTS_PER_PAGE = 48;
 
 const counted = (count, noun) => `${count.toLocaleString()} ${noun}${count === 1 ? '' : 's'}`;
 
+const named = (title, source) => title.toLowerCase().includes(source.toLowerCase().replace(/^the /, ''));
+
 function App() {
   const [route, navigate, canGoBack] = useHashRoute();
   const [collection, setCollection] = useState(null);
@@ -220,10 +222,13 @@ function App() {
             {collection.description && <p>{collection.description}</p>}
             <p className="App-header-counts">
               {[
-                counted(collection.objects, 'object'),
-                (collection.images > 0 || !(collection.models || collection.documents)) && counted(collection.images, 'image'),
+                counted(collection.objects, collection.object_label || 'object'),
+                collection.images !== collection.objects
+                  && (collection.images > 0 || !(collection.models || collection.documents))
+                  && counted(collection.images, 'image'),
                 collection.documents > 0 && counted(collection.documents, 'PDF'),
-                collection.source_name && `from ${collection.source_name}`,
+                collection.source_name && !named(title, collection.source_name)
+                  && `from ${collection.source_name}`,
               ].filter(Boolean).join(' · ')}
             </p>
           </>
