@@ -74,7 +74,9 @@ Use `--anonymous` for a public bucket, and leave it off when
 `aws_credentials_found` is true and the bucket is private. A manifest names each
 image in a column such as `image_url`, or only by its IIIF service in a column
 such as `iiif`, with any catalog fields beside it, and a `group` column when
-the site holds several institutions or museums. Read the printed report and
+the site holds several institutions or museums. [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/)
+lists the columns the site reads and shows how to make a manifest from a
+spreadsheet, a collection system's export or IIIF manifests. Read the printed report and
 `/tmp/profile.json`.
 
 **If the report warns that image files could not be read**, fix that first. The
@@ -105,7 +107,7 @@ A few short paragraphs, leading with whatever would surprise them most:
 2. What they will be able to do: the report's "The site will" list, which
    follows the rules the site itself uses. "What the site does with each
    column" says how each column is read. A column whose name the site does not
-   know is read as notes; renamed, such as `maker` to `creator`, it becomes a
+   know is read as notes; renamed, such as `made_by` to `creator`, it becomes a
    name to search and filter by.
 3. What they will not be able to do, why, and what would change that.
 4. What it will cost: time, disk space, and whether this machine can handle it.
@@ -206,8 +208,9 @@ generic title and no suggested searches. Write one with the person from
 `collection.example.json`: a title, one or two sentences of introduction, the
 institution, the license, and six to eight searches you have run and that return
 good results. With a `group` column, add `groups`, giving each group its
-`label`, `institution` and `license`; an object's page shows its group's. The
-site reads it on every visit, so no restart is needed.
+`label`, `institution` and `license`; an object's page shows its group's
+([Collection format](https://l4cch.github.io/dce-website/docs/collection-format/#several-institutions-in-one-site)).
+The site reads it on every visit, so no restart is needed.
 
 ## Step 7. Tell the person how it went
 

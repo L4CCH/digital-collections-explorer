@@ -1,6 +1,6 @@
 # One collection format, one pipeline
 
-Status: decided 2026-11-10. Phases 1 to 5 are built; phase 2 took in phase 3.
+Status: decided 2026-11-10. All six phases are built; phase 2 took in phase 3.
 
 ## Why
 
