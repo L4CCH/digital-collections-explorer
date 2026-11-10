@@ -66,21 +66,27 @@ Format 3 is format 2 with these optional columns. The site reads both, so si-oa 
 
 ## 2. The collection manifest
 
-What a person or a pipeline gives DCE. The smallest is a folder of images. A catalog comes as one table, or two.
+What a person or a pipeline gives DCE. The smallest is a folder of files. A catalog comes as one table, or two.
 
-**Images**, one row per file: a folder, an S3 prefix, or a parquet table with
+**Files**, one row per file, which may be an image, a PDF or a 3D model: a folder, an S3 prefix, or a parquet table with
 
 | Column | Holds | Needed for |
 | --- | --- | --- |
-| `image_url` (or `url`, `path`, `file`, `uri`) | the file's address, relative to the manifest or a web address | the image itself, unless `iiif` names it |
+| `image_url` (or `url`, `path`, `file`, `uri`) | the file's address, relative to the manifest or a web address | the file itself, unless `iiif` names an image |
 | `iiif` (or `iiif_url`, `iiif_service`, `iiif_info`) | its IIIF image service | deep zoom, and sizes asked of the service |
 | `thumbnail_url` | a thumbnail the source already makes | showing it without a copy |
-| `object_id` (or `record_id`, `item_id`) | the object it belongs to | showing an object's images together, and joining the records table |
+| `object_id` (or `record_id`, `item_id`) | the object it belongs to | showing an object's files together, and joining the records table |
 | `group` | the group it belongs to, such as a museum | the group filter |
 | `model_url`, `view_orbit` | a 3D model, the camera of a rendered view | 3D models |
 | any catalog column | as in the records table | when the catalog comes in the same table |
 
-**Records**, optional, one row per object: `object_id`, then the catalog. Without it, the catalog columns of the images table are read, from the first image of each object.
+**Records**, optional, one row per object: `object_id`, then the catalog. Without it, the catalog columns of the files table are read, from the first file of each object. A record whose object has no file is left out, since nothing about it can be seen, and the profile says how many there are.
+
+What DCE makes of each kind of file:
+
+- **An image** is one item, searched by what it shows.
+- **A PDF** is one object, its record's `document` pointing to the file and `pages` counting them. DCE draws each page as an image, keeps the copies, and indexes it as an item with its `page`; the object's page turns through them and opens the whole PDF. Keeping thumbnails only or linking does not apply, since no source serves the pages drawn.
+- **A 3D model** is drawn from several sides first, by `src.render3d`; each view is an item with its `view_orbit`, and the record's `model_url` opens the model.
 
 Catalog columns are read by name, case aside and plurals too:
 
@@ -106,13 +112,13 @@ A pipeline that knows more than a table can say may add, beside the records:
 - `facets`: `object_id`, `facet`, `value`, to set the filters itself
 - `related`: the rows of `related_sources` and `related_tags`
 
-**Vectors**, optional: a pipeline that embeds the images itself, as si-oa does with two models, hands over `vectors/<model>/<group>.npy` and `.ids.npy` with the models' details, and DCE writes the rest without embedding again.
+**Vectors**, optional: a pipeline that embeds the files itself, as si-oa does with two models, hands over `vectors/<model>/<group>.npy` and `.ids.npy` with the models' details, and DCE writes the rest without embedding again.
 
 **What each part of the site needs.** The profile reports this for every collection before indexing, with the same rules the writer uses, so what an agent tells a person is what the site will do:
 
 | The site can | when the data has |
 | --- | --- |
-| search by description and by image | images |
+| search by description and by image | images, PDFs or 3D models |
 | show titles and link back | `title`, a link column |
 | search the catalog as well (hybrid search) | any catalog text |
 | filter by date, place, kind, culture, subject, name | the columns read as those |
