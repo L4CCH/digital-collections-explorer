@@ -12,19 +12,11 @@ ROBOTS_TXT = """\
 # This collection is public. Search engines and AI assistants are welcome to read it.
 # Only the search endpoints are kept off limits: they are the one costly thing the site does.
 User-agent: *
-Allow: /
-Disallow: {base_path}/api/search/
-
 User-agent: GPTBot
-Allow: /
-
 User-agent: ClaudeBot
-Allow: /
-
 User-agent: PerplexityBot
-Allow: /
-
 User-agent: Google-Extended
+Disallow: {base_path}/api/search/
 Allow: /
 """
 
@@ -42,16 +34,18 @@ def home_page(index_html: str, collection: Dict[str, Any]) -> str:
     """Fill the home page's title, description and sharing tags from the collection"""
     title = escape(collection.get("title") or "Digital Collections Explorer")
     description = escape(collection.get("description") or "")
-    tags = "\n    ".join(
-        [
-            f"<title>{title}</title>",
+    lines = [
+        f"<title>{title}</title>",
+        f'<meta property="og:title" content="{title}" />',
+        '<meta property="og:type" content="website" />',
+        '<meta name="twitter:card" content="summary" />',
+    ]
+    if description:
+        lines += [
             f'<meta name="description" content="{description}" />',
-            f'<meta property="og:title" content="{title}" />',
             f'<meta property="og:description" content="{description}" />',
-            '<meta property="og:type" content="website" />',
-            '<meta name="twitter:card" content="summary" />',
         ]
-    )
+    tags = "\n    ".join(lines)
     page = DESCRIPTION.sub("", index_html, count=1)
     if TITLE.search(page):
         return TITLE.sub(lambda _: tags, page, count=1)
