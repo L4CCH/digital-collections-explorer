@@ -308,7 +308,11 @@ def main() -> int:
             print(f"  {status:<8} {count:>6,}  {error}")
 
     written = write_from_state(
-        state, embeddings_dir, settings.model_type.value, settings.model_name
+        state,
+        embeddings_dir,
+        settings.model_type.value,
+        settings.model_name,
+        settings.model_revision,
     )
     if written:
         state.remember("collection", json.dumps(written))
