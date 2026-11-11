@@ -35,6 +35,35 @@ def call(tool, arguments=None):
     return anyio.run(run)
 
 
+def call_over_http(tool, arguments, address="http://localhost:8000", headers=None):
+    from src.backend.api import mcp_server
+
+    app = Starlette(routes=mcp_server.http_routes())
+
+    async def run():
+        async with mcp_server.server.session_manager.run():
+            transport = httpx2.ASGITransport(app=app)
+            async with httpx2.AsyncClient(
+                transport=transport, base_url=address, headers=headers
+            ) as http:
+                connection = streamable_http_client(f"{address}/mcp", http_client=http)
+                async with Client(connection) as client:
+                    return await client.call_tool(tool, arguments)
+
+    return anyio.run(run)
+
+
+def configure(folder, **values):
+    (folder / "settings.json").write_text(json.dumps(values))
+
+
+def first_page(answer):
+    return answer.structured_content["results"][0]["page"]
+
+
+QUILTS = {"query": "quilt", "groups": ["west"]}
+
+
 def test_every_tool_only_reads():
     from src.backend.api import mcp_server
 
@@ -307,6 +336,36 @@ def test_the_endpoint_answers_over_http_with_links_to_the_public_address(monkeyp
     app = Starlette(routes=mcp_server.http_routes())
     seen_there = anyio.run(run).structured_content["results"][0]
     assert seen_there["page"] == "https://collection.example.org/#/item/b1"
+
+
+def test_links_take_https_from_the_proxy_only_when_one_is_declared(tmp_path):
+    https = {"X-Forwarded-Proto": "https"}
+    assert first_page(call_over_http("search_collection", QUILTS, headers=https)) == (
+        "http://localhost:8000/#/item/b1"
+    )
+    configure(tmp_path, proxy_hops=1)
+    assert first_page(call_over_http("search_collection", QUILTS, headers=https)) == (
+        "https://localhost:8000/#/item/b1"
+    )
+    renamed = {**https, "X-Forwarded-Host": "collection.example.org"}
+    similar = {"id": "a1", "groups": ["west"]}
+    assert first_page(call_over_http("find_similar", similar, headers=renamed)) == (
+        "https://collection.example.org/#/item/b1"
+    )
+    odd = {"X-Forwarded-Proto": "javascript"}
+    assert first_page(call_over_http("search_collection", QUILTS, headers=odd)) == (
+        "http://localhost:8000/#/item/b1"
+    )
+
+
+def test_the_public_address_wins_over_what_the_proxy_says(tmp_path, monkeypatch):
+    from src.backend.core.config import settings
+
+    configure(tmp_path, proxy_hops=1)
+    monkeypatch.setattr(settings, "public_url", "https://library.example.org/maps")
+    forwarded = {"X-Forwarded-Proto": "http", "X-Forwarded-Host": "elsewhere.example"}
+    answer = call_over_http("search_collection", QUILTS, headers=forwarded)
+    assert first_page(answer) == "https://library.example.org/maps/#/item/b1"
 
 
 def test_the_endpoint_refuses_requests_over_four_megabytes():

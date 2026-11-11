@@ -14,6 +14,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from PIL import Image
 from pydantic import BaseModel, Field
+from starlette.requests import Request
 from starlette.routing import BaseRoute
 
 from ..core.config import settings
@@ -27,6 +28,7 @@ MAX_RESULTS = 20
 # Pixels on the shorter side below which a crop holds too little to compare.
 MIN_CROP_PIXELS = 16
 MODES = {"auto": "auto", "appearance": "visual", "catalog": "keyword"}
+SCHEMES = ("http", "https")
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 Groups = Annotated[
     Optional[List[str]],
@@ -253,6 +255,15 @@ class CollectionSummary(BaseModel):
     example_queries: List[str]
 
 
+def own_origin(request: Request) -> str:
+    """The scheme and host a request reached the site at, as the declared proxies tell"""
+    scheme = (limits.forwarded_value(request, "x-forwarded-proto") or "").lower()
+    if scheme not in SCHEMES:
+        scheme = request.url.scheme
+    host = limits.forwarded_value(request, "x-forwarded-host") or request.url.netloc
+    return f"{scheme}://{host}"
+
+
 def site_address(ctx: Context) -> str:
     """Where the site is reached, so links work outside it"""
     if settings.public_url:
@@ -260,7 +271,7 @@ def site_address(ctx: Context) -> str:
     request = ctx.request_context.request
     if request is None:
         return settings.base_path
-    return f"{request.url.scheme}://{request.url.netloc}{settings.base_path}"
+    return own_origin(request) + settings.base_path
 
 
 async def allow(ctx: Context) -> None:

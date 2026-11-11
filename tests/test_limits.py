@@ -97,6 +97,30 @@ def test_only_the_address_added_by_the_trusted_proxy_counts(site):
         assert answer.status_code == expected
 
 
+@pytest.mark.parametrize(
+    "hops, sent, read",
+    [
+        (0, "https", None),
+        (1, "https", "https"),
+        (1, "http, https", "https"),
+        (2, "https, http", "https"),
+        (2, "https", "https"),
+        (1, "", None),
+    ],
+)
+def test_a_forwarded_scheme_is_the_one_the_outermost_declared_proxy_saw(
+    site, hops, sent, read
+):
+    from starlette.requests import Request
+
+    _, configure, _, limits = site
+    configure(proxy_hops=hops)
+    request = Request(
+        {"type": "http", "headers": [(b"x-forwarded-proto", sent.encode())]}
+    )
+    assert limits.forwarded_value(request, "x-forwarded-proto") == read
+
+
 def test_the_wait_ends_when_the_minute_has_passed(site):
     limits = site[3]
     allowance = limits.SearchAllowance()
