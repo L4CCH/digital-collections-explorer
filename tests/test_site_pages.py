@@ -1,4 +1,5 @@
 import asyncio
+from urllib.robotparser import RobotFileParser
 
 import pytest
 
@@ -53,11 +54,19 @@ def test_home_page_adds_tags_when_the_template_has_none():
     assert page.index("<title>") < page.index("</head>")
 
 
-def test_robots_welcome_crawlers_but_not_on_the_search_endpoints():
-    robots = site_pages.robots_txt()
-    assert "User-agent: *\nAllow: /\nDisallow: /api/search/" in robots
-    assert "User-agent: ClaudeBot\nAllow: /" in robots
-    assert "GPTBot" in robots
+def test_home_page_leaves_out_a_description_the_collection_does_not_give():
+    page = site_pages.home_page(INDEX, {"title": "Smithsonian Open Access"})
+    assert 'name="description"' not in page
+    assert "og:description" not in page
+
+
+def test_robots_welcome_crawlers_but_keep_every_one_off_the_search_endpoints():
+    robots = RobotFileParser()
+    robots.parse(site_pages.robots_txt().splitlines())
+    for agent in ("Googlebot", "GPTBot", "ClaudeBot", "PerplexityBot"):
+        assert robots.can_fetch(agent, "/")
+        assert robots.can_fetch(agent, "/llms.txt")
+        assert not robots.can_fetch(agent, "/api/search/text?query=a+map")
 
 
 def test_crawler_pages_follow_the_site_under_a_base_path():
