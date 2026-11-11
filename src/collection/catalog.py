@@ -170,6 +170,14 @@ def group_id_warning(columns) -> str | None:
     return GROUP_ID_LEFT_OUT.format(column=column) if column else GROUP_ID_NAMES_OBJECTS
 
 
+DEFAULT_GROUP = "collection"
+
+
+def group_id_of(name: Any) -> str:
+    """A group's id: its name in lowercase, with hyphens for anything but letters and digits"""
+    return re.sub(r"[\W_]+", "-", str(name).strip().lower()).strip("-")
+
+
 def is_blank(value: Any) -> bool:
     if value is None:
         return True

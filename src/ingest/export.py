@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from src.backend.services.catalog_fields import object_id_from
-from src.collection.catalog import is_blank, merged, read_catalog
+from src.collection.catalog import (
+    DEFAULT_GROUP,
+    group_id_of,
+    is_blank,
+    merged,
+    read_catalog,
+)
 from src.collection.writer import Group, Item, Model, Record, write_collection
 
 from .state import IngestState
 
 GROUP_COLUMN = "group"
-DEFAULT_GROUP = "collection"
 
 
 def group_of(catalog: dict) -> tuple[str, str]:
@@ -30,7 +34,7 @@ def group_of(catalog: dict) -> tuple[str, str]:
     )
     if name is None:
         return DEFAULT_GROUP, DEFAULT_GROUP
-    return re.sub(r"[\W_]+", "-", name.lower()).strip("-") or DEFAULT_GROUP, name
+    return group_id_of(name) or DEFAULT_GROUP, name
 
 
 def record_of(item_id: str, metadata: dict, catalog: dict) -> tuple[str | None, bool]:
