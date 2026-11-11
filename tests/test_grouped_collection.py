@@ -377,6 +377,7 @@ def site(grouped, monkeypatch, tmp_path):
     monkeypatch.setattr(images, "embedding_service", grouped.embeddings)
     monkeypatch.setattr(site_settings.settings, "data_dir", str(tmp_path))
     monkeypatch.setattr(limits, "allowance", limits.SearchAllowance())
+    monkeypatch.setattr(limits, "assistant_allowance", limits.SearchAllowance())
     monkeypatch.setattr(limits, "search_queue", limits.SearchQueue())
     monkeypatch.setattr(search, "search_queue", limits.search_queue)
     return TestClient(main.app)

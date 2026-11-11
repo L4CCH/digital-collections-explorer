@@ -69,12 +69,24 @@ class SearchAllowance:
 
 
 allowance = SearchAllowance()
+assistant_allowance = SearchAllowance()
 
 
 async def limit_searches(request: Request) -> None:
-    wait = allowance.seconds_until_allowed(
-        visitor_address(request), site_settings()["searches_per_minute"]
+    refuse_fast_searches(allowance, request, site_settings()["searches_per_minute"])
+
+
+async def limit_assistant_searches(request: Request) -> None:
+    """Count searches through MCP apart from visitors', so neither uses up the other's"""
+    refuse_fast_searches(
+        assistant_allowance, request, site_settings()["mcp_searches_per_minute"]
     )
+
+
+def refuse_fast_searches(
+    bucket: SearchAllowance, request: Request, per_minute: int
+) -> None:
+    wait = bucket.seconds_until_allowed(visitor_address(request), per_minute)
     if wait:
         raise HTTPException(
             status_code=429,

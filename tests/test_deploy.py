@@ -664,6 +664,14 @@ def test_bootstrap_configure_changes_limits_and_keeps_the_others(installed_colle
     assert json.loads(saved.read_text()) == {"max_upload_mb": 20, "proxy_hops": 1}
 
 
+def test_bootstrap_configure_sets_the_limit_for_assistants(installed_collection):
+    run, placed = installed_collection
+    result = run("demo", "--set", "mcp_searches_per_minute=30", action="configure")
+    assert result.returncode == 0, result.stderr
+    saved = json.loads(placed.with_name("settings.json").read_text())
+    assert saved == {"mcp_searches_per_minute": 30}
+
+
 def test_bootstrap_configure_refuses_a_setting_it_does_not_know(installed_collection):
     run, placed = installed_collection
     result = run("demo", "--set", "volume=11", action="configure")
@@ -684,6 +692,15 @@ def test_configure_sends_the_new_limits_to_the_machine(fake_deploy):
     assert result.returncode == 0, result.stderr
     sent = [c for c in calls if "ssm send-command" in c][-1]
     assert "configure --name demo --set max_upload_mb=20 --set proxy_hops=1" in sent
+
+
+def test_configure_sends_the_limit_for_assistants_to_the_machine(fake_deploy):
+    result, calls = fake_deploy(
+        True, "--set", "mcp_searches_per_minute=30", script="configure.sh"
+    )
+    assert result.returncode == 0, result.stderr
+    sent = [c for c in calls if "ssm send-command" in c][-1]
+    assert "configure --name demo --set mcp_searches_per_minute=30" in sent
 
 
 def test_configure_refuses_anything_that_is_not_a_number(fake_deploy):

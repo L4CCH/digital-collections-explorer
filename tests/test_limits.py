@@ -261,6 +261,15 @@ def test_settings_are_changed_one_at_a_time_and_the_rest_are_kept(tmp_path):
     assert saved == {"max_upload_mb": 20, "proxy_hops": 1}
 
 
+def test_assistants_searches_have_a_setting_of_their_own(site, tmp_path):
+    from src.backend.core import site_settings
+
+    assert site_settings.site_settings()["mcp_searches_per_minute"] == 120
+    merged = site_settings.set_values(str(tmp_path), ["mcp_searches_per_minute=30"])
+    assert merged["searches_per_minute"] == 60
+    assert site_settings.site_settings()["mcp_searches_per_minute"] == 30
+
+
 @pytest.mark.parametrize("pair", ["volume=11", "proxy_hops=-1", "proxy_hops=many"])
 def test_unknown_or_malformed_settings_are_refused(tmp_path, pair):
     from src.backend.core import site_settings

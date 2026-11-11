@@ -375,6 +375,21 @@ def test_the_public_address_wins_over_what_the_proxy_says(tmp_path, monkeypatch)
     assert first_page(answer) == "https://library.example.org/maps/#/item/b1"
 
 
+def test_assistants_have_a_search_limit_of_their_own(site, tmp_path):
+    configure(tmp_path, searches_per_minute=1, mcp_searches_per_minute=2, proxy_hops=1)
+    one_address = {"X-Forwarded-For": "198.51.100.7"}
+    assert not call_over_http("search_collection", QUILTS, headers=one_address).is_error
+    similar = call_over_http("find_similar", {"id": "a1"}, headers=one_address)
+    assert not similar.is_error
+    third = call_over_http("search_collection", QUILTS, headers=one_address)
+    assert third.is_error and "wait a moment" in third.content[0].text
+    visitor = [site.get("/api/search/text?query=quilt", headers=one_address)]
+    visitor.append(site.get("/api/search/text?query=quilt", headers=one_address))
+    assert [answer.status_code for answer in visitor] == [200, 429]
+    configure(tmp_path, mcp_searches_per_minute=0, proxy_hops=1)
+    assert not call_over_http("search_collection", QUILTS, headers=one_address).is_error
+
+
 def test_the_endpoint_refuses_requests_over_four_megabytes():
     answer = post_to_mcp(content=b"x" * (4 * 1024 * 1024 + 1))
     assert answer.status_code == 413

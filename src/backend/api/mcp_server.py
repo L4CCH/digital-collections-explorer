@@ -289,7 +289,7 @@ async def allow(ctx: Context) -> None:
     request = ctx.request_context.request
     if request is not None:
         try:
-            await limits.limit_searches(request)
+            await limits.limit_assistant_searches(request)
         except HTTPException as refusal:
             raise ToolError(refusal.detail)
 

@@ -10,6 +10,7 @@ SETTINGS_FILE = "settings.json"
 DEFAULTS = {
     "max_upload_mb": 10,
     "searches_per_minute": 60,
+    "mcp_searches_per_minute": 120,
     "concurrent_searches": 2,
     "proxy_hops": 0,
 }
