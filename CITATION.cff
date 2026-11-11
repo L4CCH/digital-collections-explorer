@@ -1,0 +1,46 @@
+cff-version: 1.2.0
+message: If you use Digital Collections Explorer in research, please cite the paper below and the release you used.
+type: software
+title: Digital Collections Explorer
+abstract: >-
+  An open-source search site for digital collections, with or without a catalog.
+  A gallery, library, archive, or museum points it at a folder, an S3 bucket, or a
+  manifest of images and their catalog, and visitors search the collection in plain
+  language or with a picture.
+authors:
+  - given-names: Ying-Hsiang
+    family-names: Huang
+    orcid: https://orcid.org/0009-0007-4570-7738
+    affiliation: University of Washington Information School
+  - given-names: Benjamin Charles Germain
+    family-names: Lee
+    orcid: https://orcid.org/0000-0002-1677-6386
+    affiliation: University of Washington Information School
+doi: 10.5281/zenodo.15744570
+repository-code: https://github.com/L4CCH/digital-collections-explorer
+url: https://l4cch.github.io/dce-website
+license: MIT
+keywords:
+  - digital collections
+  - digital libraries
+  - cultural heritage
+  - GLAM
+  - multimodal search
+  - image search
+  - digital humanities
+preferred-citation:
+  type: article
+  title: "Digital Collections Explorer: An Open-Source, Multimodal Viewer for Searching Digital Collections"
+  authors:
+    - given-names: Ying-Hsiang
+      family-names: Huang
+      orcid: https://orcid.org/0009-0007-4570-7738
+    - given-names: Benjamin Charles Germain
+      family-names: Lee
+      orcid: https://orcid.org/0000-0002-1677-6386
+  journal: Computational Humanities Research
+  volume: 1
+  start: e14
+  year: 2025
+  doi: 10.1017/chr.2025.10017
+  url: https://doi.org/10.1017/chr.2025.10017
