@@ -29,6 +29,8 @@ CERTIFICATE_ARN=""
 NO_DOMAIN="false"
 BASE_PATH=""
 MCP="false"
+PUBLIC_URL=""
+NO_PUBLIC_URL="false"
 ASSUME_YES="false"
 
 usage() {
@@ -62,8 +64,12 @@ Everything you leave out keeps the value the deployment already has.
   --base-path PATH      serve the site under PATH, such as /explorer, for a website of
                         your own whose proxy forwards that path here. Only when the
                         machine is first created
-  --mcp                 also answer AI assistants at /mcp, with links to the site's address.
-                        Later, turn it on or off with mcp.sh
+  --mcp                 also answer AI assistants at /mcp, with links to the site's address
+                        or to --public-url. Later, turn it on or off with mcp.sh
+  --public-url URL      the address visitors use when a website of your own serves the
+                        site under a path, such as https://library.example.org/explorer,
+                        so that the links MCP hands out lead through it
+  --no-public-url       give MCP links the site's own address again
   --budget USD          email an alert when the monthly bill passes this amount
   --email ADDRESS       where to send that alert
   --image IMAGE         container image to install. Later, switch versions with update.sh
@@ -98,6 +104,8 @@ while [ $# -gt 0 ]; do
     --no-domain) NO_DOMAIN="true"; shift ;;
     --base-path) BASE_PATH="$2"; shift 2 ;;
     --mcp) MCP="true"; shift ;;
+    --public-url) PUBLIC_URL="${2%/}"; shift 2 ;;
+    --no-public-url) NO_PUBLIC_URL="true"; shift ;;
     --budget) BUDGET="$2"; shift 2 ;;
     --email) EMAIL="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
@@ -115,6 +123,9 @@ if [ -n "$BASE_PATH" ]; then
     [[ "$BASE_PATH" =~ ^(/[A-Za-z0-9._~-]+)+$ ]] ||
         fail "--base-path must look like /explorer: letters, digits, '.', '_', '~' and '-' between slashes"
 fi
+[ -z "$PUBLIC_URL" ] || [[ "$PUBLIC_URL" =~ ^https?://[A-Za-z0-9.:/_~-]+$ ]] ||
+    fail "--public-url must be an http:// or https:// address, such as https://library.example.org/explorer"
+[ -z "$PUBLIC_URL" ] || [ "$NO_PUBLIC_URL" = "false" ] || fail "use --public-url or --no-public-url, not both"
 [ -z "$COLLECTION_FILE" ] || [ -f "$COLLECTION_FILE" ] || fail "file not found: $COLLECTION_FILE"
 command -v aws >/dev/null 2>&1 || fail "the AWS CLI is not installed"
 
@@ -196,6 +207,12 @@ if [ -n "$EXISTING_INSTANCE" ] && [ "$EXISTING_INSTANCE" != "None" ]; then
     else
         keep DOMAIN Domain "Domain of your own"
         keep CERTIFICATE_ARN CertificateArn "Certificate for the domain"
+    fi
+    if [ "$NO_PUBLIC_URL" = "true" ]; then
+        CURRENT_PUBLIC_URL="$(current_parameter PublicUrl)"
+        [ -z "$CURRENT_PUBLIC_URL" ] || CHANGES+=("Address in MCP links: $CURRENT_PUBLIC_URL -> the site's own")
+    else
+        keep PUBLIC_URL PublicUrl "Address in MCP links"
     fi
     [ "$HTTPS" = "true" ] || keep ALLOWED_CIDR AllowedCidr "Who may open the site"
 else
@@ -332,6 +349,7 @@ fi
 [ -n "$COLLECTION_FILE" ] && echo "  The site will describe itself with $COLLECTION_FILE"
 [ -n "$BASE_PATH" ] && echo "  The site answers under $BASE_PATH, for a proxy of your own to forward there"
 [ "$MCP" = "true" ] && echo "  The site also answers AI assistants at /mcp"
+[ -n "$PUBLIC_URL" ] && echo "  The links it hands AI assistants lead through $PUBLIC_URL"
 echo
 echo "Estimated cost while it is running:"
 "$PYTHON" "$HERE/estimate_cost.py" --region "$REGION" \
@@ -359,6 +377,7 @@ overrides=(
     "MonthlyBudgetUsd=$BUDGET" "BudgetEmail=$EMAIL" "MachineImageId=$MACHINE_IMAGE"
     "PublicHttps=$HTTPS" "CloudFrontPrefixList=$CLOUDFRONT_PREFIX_LIST"
     "Domain=$DOMAIN" "CertificateArn=$CERTIFICATE_ARN" "BasePath=$BASE_PATH"
+    "PublicUrl=$PUBLIC_URL"
 )
 [ -n "$IMAGE" ] && overrides+=("Image=$IMAGE")
 [ -n "$BOOTSTRAP_URL" ] && overrides+=("BootstrapUrl=$BOOTSTRAP_URL")
@@ -409,7 +428,10 @@ if [ "$MCP" = "true" ]; then
     [ -n "$MACHINE_BOOTSTRAP_URL" ] && mcp_flags+=(--bootstrap-url "$MACHINE_BOOTSTRAP_URL")
     "$HERE/mcp.sh" "$NAME" "${mcp_flags[@]}" ||
         echo "The deployment itself succeeded. Once the site is up, turn MCP on with: deploy/aws/mcp.sh $NAME --on --region $REGION"
-elif [ "$IS_UPDATE" = "true" ] && { [ "$HTTPS" != "$CURRENT_HTTPS" ] || [ "$DOMAIN" != "$(current_parameter Domain)" ]; }; then
+elif [ "$IS_UPDATE" = "true" ] && [ "$PUBLIC_URL" != "$(current_parameter PublicUrl)" ]; then
+    echo
+    echo "The address in MCP links changed. If the site answers AI assistants, point their links at it with: deploy/aws/mcp.sh $NAME --on --region $REGION"
+elif [ "$IS_UPDATE" = "true" ] && [ -z "$PUBLIC_URL" ] && { [ "$HTTPS" != "$CURRENT_HTTPS" ] || [ "$DOMAIN" != "$(current_parameter Domain)" ]; }; then
     echo
     echo "The site's address changed. If it answers AI assistants, point their links at the new address with: deploy/aws/mcp.sh $NAME --on --region $REGION"
 fi
