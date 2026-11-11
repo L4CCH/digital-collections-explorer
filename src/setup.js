@@ -150,7 +150,7 @@ const main = async () => {
     console.log(chalk.yellow('\nIndexing these needs a few more Python packages:'));
     python.forEach((command) => console.log(`  ${command}`));
   }
-  console.log(chalk.yellow('\nGo check README.md for the next step.'));
+  console.log(chalk.yellow('\nNext, index a collection and serve it: https://l4cch.github.io/dce-website/docs/indexing/'));
 };
 
 main();
