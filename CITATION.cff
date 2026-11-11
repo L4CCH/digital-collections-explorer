@@ -3,7 +3,7 @@ message: If you use Digital Collections Explorer in research, please cite the pa
 type: software
 title: Digital Collections Explorer
 abstract: >-
-  An open-source search site for digital collections, with or without a catalog.
+  The open-source, multimodal viewer for searching digital collections, with or without a catalog.
   A gallery, library, archive, or museum points it at a folder, an S3 bucket, or a
   manifest of images and their catalog, and visitors search the collection in plain
   language or with a picture.
