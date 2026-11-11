@@ -9,8 +9,7 @@ from typing import Any
 import numpy as np
 
 from src.backend.services.catalog_fields import object_id_from
-from src.collection.catalog import read_catalog
-from src.collection.manifest import is_blank, merged
+from src.collection.catalog import is_blank, merged, read_catalog
 from src.collection.writer import Group, Item, Model, Record, write_collection
 
 from .state import IngestState

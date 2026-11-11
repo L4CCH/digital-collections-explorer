@@ -170,6 +170,24 @@ def group_id_warning(columns) -> str | None:
     return GROUP_ID_LEFT_OUT.format(column=column) if column else GROUP_ID_NAMES_OBJECTS
 
 
+def is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float):
+        return math.isnan(value)
+    return isinstance(value, str) and not value.strip()
+
+
+def merged(rows: list[dict]) -> dict:
+    """An object's catalog: each column's first value among its files"""
+    catalog: dict = {}
+    for row in rows:
+        for column, value in row.items():
+            if is_blank(catalog.get(column)) and not is_blank(value):
+                catalog[column] = value
+    return catalog
+
+
 @dataclass
 class Catalog:
     """A record's catalog, sorted into what the site does with each part"""

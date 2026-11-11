@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,7 @@ import numpy as np
 
 from src.backend.services.catalog_fields import is_web_address
 
-from .catalog import SEARCHED, read_catalog
+from .catalog import SEARCHED, is_blank, merged, read_catalog
 from .writer import Group, Item, Model, Record, Related, write_collection
 
 MODELS_FILE = "models.json"
@@ -51,26 +50,8 @@ RELATED_COLUMNS = (
 )
 
 
-def is_blank(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, float):
-        return math.isnan(value)
-    return isinstance(value, str) and not value.strip()
-
-
 def present(value: Any) -> Any:
     return None if is_blank(value) else value
-
-
-def merged(rows: list[dict]) -> dict:
-    """An object's catalog: each column's first value among its files"""
-    catalog: dict = {}
-    for row in rows:
-        for column, value in row.items():
-            if is_blank(catalog.get(column)) and not is_blank(value):
-                catalog[column] = value
-    return catalog
 
 
 def read_table(folder: Path, name: str) -> list[dict] | None:
