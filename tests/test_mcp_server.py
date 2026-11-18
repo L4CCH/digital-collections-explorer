@@ -35,6 +35,60 @@ def call(tool, arguments=None):
     return anyio.run(run)
 
 
+def call_over_http(tool, arguments, address="http://localhost:8000", headers=None):
+    from src.backend.api import mcp_server
+
+    app = Starlette(routes=mcp_server.http_routes())
+
+    async def run():
+        async with mcp_server.server.session_manager.run():
+            transport = httpx2.ASGITransport(app=app)
+            async with httpx2.AsyncClient(
+                transport=transport, base_url=address, headers=headers
+            ) as http:
+                connection = streamable_http_client(f"{address}/mcp", http_client=http)
+                async with Client(connection) as client:
+                    return await client.call_tool(tool, arguments)
+
+    return anyio.run(run)
+
+
+def post_to_mcp(address="http://localhost:8000", headers=None, content=None):
+    from src.backend.api import mcp_server
+
+    app = Starlette(routes=mcp_server.http_routes())
+    ping = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+
+    async def run():
+        async with mcp_server.server.session_manager.run():
+            transport = httpx2.ASGITransport(app=app)
+            async with httpx2.AsyncClient(
+                transport=transport, base_url=address
+            ) as http:
+                return await http.post(
+                    "/mcp",
+                    content=content or json.dumps(ping).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        **(headers or {}),
+                    },
+                )
+
+    return anyio.run(run)
+
+
+def configure(folder, **values):
+    (folder / "settings.json").write_text(json.dumps(values))
+
+
+def first_page(answer):
+    return answer.structured_content["results"][0]["page"]
+
+
+QUILTS = {"query": "quilt", "groups": ["west"]}
+
+
 def test_every_tool_only_reads():
     from src.backend.api import mcp_server
 
@@ -282,53 +336,135 @@ def test_an_image_of_the_assistants_own_can_be_the_query(stored_images):
 
 
 def test_the_endpoint_answers_over_http_with_links_to_the_public_address(monkeypatch):
-    from src.backend.api import mcp_server
     from src.backend.core.config import settings
 
-    app = Starlette(routes=mcp_server.http_routes())
-
-    async def run():
-        async with mcp_server.server.session_manager.run():
-            transport = httpx2.ASGITransport(app=app)
-            async with httpx2.AsyncClient(
-                transport=transport, base_url="http://mcp.test"
-            ) as http:
-                connection = streamable_http_client(
-                    "http://mcp.test/mcp", http_client=http
-                )
-                async with Client(connection) as client:
-                    return await client.call_tool(
-                        "search_collection", {"query": "quilt", "groups": ["west"]}
-                    )
-
-    seen_here = anyio.run(run).structured_content["results"][0]
-    assert seen_here["page"] == "http://mcp.test/#/item/b1"
+    seen_here = call_over_http("search_collection", QUILTS)
+    assert first_page(seen_here) == "http://localhost:8000/#/item/b1"
     monkeypatch.setattr(settings, "public_url", "https://collection.example.org")
-    app = Starlette(routes=mcp_server.http_routes())
-    seen_there = anyio.run(run).structured_content["results"][0]
-    assert seen_there["page"] == "https://collection.example.org/#/item/b1"
+    seen_there = call_over_http("search_collection", QUILTS)
+    assert first_page(seen_there) == "https://collection.example.org/#/item/b1"
+
+
+def test_links_take_https_from_the_proxy_only_when_one_is_declared(tmp_path):
+    https = {"X-Forwarded-Proto": "https"}
+    assert first_page(call_over_http("search_collection", QUILTS, headers=https)) == (
+        "http://localhost:8000/#/item/b1"
+    )
+    configure(tmp_path, proxy_hops=1)
+    assert first_page(call_over_http("search_collection", QUILTS, headers=https)) == (
+        "https://localhost:8000/#/item/b1"
+    )
+    renamed = {**https, "X-Forwarded-Host": "collection.example.org"}
+    similar = {"id": "a1", "groups": ["west"]}
+    assert first_page(call_over_http("find_similar", similar, headers=renamed)) == (
+        "https://collection.example.org/#/item/b1"
+    )
+    odd = {"X-Forwarded-Proto": "javascript"}
+    assert first_page(call_over_http("search_collection", QUILTS, headers=odd)) == (
+        "http://localhost:8000/#/item/b1"
+    )
+
+
+def test_the_public_address_wins_over_what_the_proxy_says(tmp_path, monkeypatch):
+    from src.backend.core.config import settings
+
+    configure(tmp_path, proxy_hops=1)
+    monkeypatch.setattr(settings, "public_url", "https://library.example.org/maps")
+    forwarded = {"X-Forwarded-Proto": "http", "X-Forwarded-Host": "elsewhere.example"}
+    answer = call_over_http("search_collection", QUILTS, headers=forwarded)
+    assert first_page(answer) == "https://library.example.org/maps/#/item/b1"
+
+
+def test_assistants_have_a_search_limit_of_their_own(site, tmp_path):
+    configure(tmp_path, searches_per_minute=1, mcp_searches_per_minute=2, proxy_hops=1)
+    one_address = {"X-Forwarded-For": "198.51.100.7"}
+    assert not call_over_http("search_collection", QUILTS, headers=one_address).is_error
+    similar = call_over_http("find_similar", {"id": "a1"}, headers=one_address)
+    assert not similar.is_error
+    third = call_over_http("search_collection", QUILTS, headers=one_address)
+    assert third.is_error and "wait a moment" in third.content[0].text
+    visitor = [site.get("/api/search/text?query=quilt", headers=one_address)]
+    visitor.append(site.get("/api/search/text?query=quilt", headers=one_address))
+    assert [answer.status_code for answer in visitor] == [200, 429]
+    configure(tmp_path, mcp_searches_per_minute=0, proxy_hops=1)
+    assert not call_over_http("search_collection", QUILTS, headers=one_address).is_error
 
 
 def test_the_endpoint_refuses_requests_over_four_megabytes():
-    from src.backend.api import mcp_server
-
-    async def run(app):
-        async with mcp_server.server.session_manager.run():
-            transport = httpx2.ASGITransport(app=app)
-            async with httpx2.AsyncClient(
-                transport=transport, base_url="http://mcp.test"
-            ) as http:
-                return await http.post(
-                    "/mcp",
-                    content=b"x" * (4 * 1024 * 1024 + 1),
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "application/json, text/event-stream",
-                    },
-                )
-
-    answer = anyio.run(run, Starlette(routes=mcp_server.http_routes()))
+    answer = post_to_mcp(content=b"x" * (4 * 1024 * 1024 + 1))
     assert answer.status_code == 413
+
+
+def test_a_page_on_another_site_is_turned_away():
+    for origin in ("https://elsewhere.example", "http://localhost.elsewhere.example"):
+        answer = post_to_mcp(headers={"Origin": origin})
+        assert answer.status_code == 403
+        assert "other sites" in answer.text
+
+
+def test_assistants_which_send_no_origin_are_answered():
+    assert post_to_mcp().json() == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+
+def test_an_origin_of_null_is_turned_away():
+    assert post_to_mcp(headers={"Origin": "null"}).status_code == 403
+
+
+def test_pages_on_this_computer_and_on_the_site_itself_may_call_it(monkeypatch):
+    from src.backend.core.config import settings
+
+    for origin in ("http://localhost:5173", "https://127.0.0.1:3000", "http://[::1]"):
+        assert post_to_mcp(headers={"Origin": origin}).status_code == 200
+    by_ip = "http://203.0.113.10:8000"
+    assert post_to_mcp(by_ip, headers={"Origin": by_ip}).status_code == 200
+    other_scheme = {"Origin": "https://203.0.113.10:8000"}
+    assert post_to_mcp(by_ip, headers=other_scheme).status_code == 403
+    monkeypatch.setattr(settings, "public_url", "https://library.example.org/maps")
+    public = {"Origin": "https://library.example.org"}
+    assert post_to_mcp(by_ip, headers=public).status_code == 200
+
+
+def test_a_name_other_than_the_sites_own_is_turned_away():
+    answer = post_to_mcp("http://rebound.example:8000")
+    assert answer.status_code == 421
+    assert "Set DCE_PUBLIC_URL to the address visitors use" in answer.text
+
+
+def test_the_name_in_the_public_address_is_answered_at_any_port(monkeypatch):
+    from src.backend.core.config import settings
+
+    monkeypatch.setattr(settings, "public_url", "https://collection.example.org/maps")
+    for address in (
+        "http://collection.example.org",
+        "http://collection.example.org:81",
+    ):
+        assert post_to_mcp(address).status_code == 200
+    assert post_to_mcp("http://other.example.org").status_code == 421
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "http://203.0.113.10",
+        "http://203.0.113.10:8000",
+        "http://[2001:db8::1]:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost",
+    ],
+)
+def test_an_ip_address_or_localhost_is_answered(address):
+    assert post_to_mcp(address).status_code == 200
+
+
+def test_any_name_is_answered_behind_a_declared_proxy(tmp_path):
+    configure(tmp_path, proxy_hops=1)
+    machine = "http://ec2-203-0-113-10.us-west-2.compute.amazonaws.com"
+    assert post_to_mcp(machine).status_code == 200
+    forwarded = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "c.example.org"}
+    own = {**forwarded, "Origin": "https://c.example.org"}
+    assert post_to_mcp(machine, headers=own).status_code == 200
+    elsewhere = {**forwarded, "Origin": "https://elsewhere.example"}
+    assert post_to_mcp(machine, headers=elsewhere).status_code == 403
 
 
 def test_the_servers_that_keep_an_image_are_known():

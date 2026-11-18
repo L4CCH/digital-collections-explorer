@@ -2,7 +2,7 @@ import asyncio
 import time
 from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
-from typing import Deque, Optional
+from typing import Deque, List, Optional
 
 from fastapi import HTTPException, Request, UploadFile
 
@@ -18,17 +18,31 @@ MCP_PATH = "/mcp"
 MAX_UPLOAD_PIXELS = 50_000_000
 
 
+def forwarded(request: Request, header: str) -> List[str]:
+    """The entries proxies have added to a forwarding header, the nearest proxy's last"""
+    return [
+        part.strip()
+        for part in request.headers.get(header, "").split(",")
+        if part.strip()
+    ]
+
+
 def visitor_address(request: Request) -> str:
     """The visitor's address, read past the proxies the administrator has declared"""
     hops = site_settings()["proxy_hops"]
-    forwarded = [
-        part.strip()
-        for part in request.headers.get("x-forwarded-for", "").split(",")
-        if part.strip()
-    ]
-    if hops and len(forwarded) >= hops:
-        return forwarded[-hops]
+    addresses = forwarded(request, "x-forwarded-for")
+    if hops and len(addresses) >= hops:
+        return addresses[-hops]
     return request.client.host if request.client else "unknown"
+
+
+def forwarded_value(request: Request, header: str) -> Optional[str]:
+    """The entry the outermost declared proxy added to a forwarding header, or the earliest"""
+    hops = site_settings()["proxy_hops"]
+    entries = forwarded(request, header)
+    if not hops or not entries:
+        return None
+    return entries[-min(hops, len(entries))]
 
 
 class SearchAllowance:
@@ -55,12 +69,24 @@ class SearchAllowance:
 
 
 allowance = SearchAllowance()
+assistant_allowance = SearchAllowance()
 
 
 async def limit_searches(request: Request) -> None:
-    wait = allowance.seconds_until_allowed(
-        visitor_address(request), site_settings()["searches_per_minute"]
+    refuse_fast_searches(allowance, request, site_settings()["searches_per_minute"])
+
+
+async def limit_assistant_searches(request: Request) -> None:
+    """Count searches through MCP apart from visitors', so neither uses up the other's"""
+    refuse_fast_searches(
+        assistant_allowance, request, site_settings()["mcp_searches_per_minute"]
     )
+
+
+def refuse_fast_searches(
+    bucket: SearchAllowance, request: Request, per_minute: int
+) -> None:
+    wait = bucket.seconds_until_allowed(visitor_address(request), per_minute)
     if wait:
         raise HTTPException(
             status_code=429,

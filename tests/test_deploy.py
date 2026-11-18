@@ -79,6 +79,8 @@ case "$*" in
     echo "i-0existing" ;;
 *"OutputKey=='SiteUrl'"*) echo "$FAKE_SITE_URL" ;;
 *"ParameterKey=='BootstrapUrl'"*) echo "https://example.org/bootstrap.sh" ;;
+*"ParameterKey=='PublicUrl'"*) echo "$FAKE_PUBLIC_URL" ;;
+*"Parameters[].ParameterKey"*) printf '%s\n' "$FAKE_PARAMETER_KEYS" ;;
 *"describe-stacks"*"Parameters[]"*)
     printf 'CollectionName\tdemo\n'
     if [ -n "$FAKE_PREPARED_FROM" ]; then
@@ -100,7 +102,8 @@ case "$*" in
     printf 'PublicHttps\t%s\n' "${FAKE_HTTPS:-false}"
     printf 'Domain\t%s\n' "$FAKE_DOMAIN"
     printf 'CertificateArn\t%s\n' "$FAKE_CERTIFICATE"
-    printf 'BasePath\t%s\n' "$FAKE_BASE_PATH" ;;
+    printf 'BasePath\t%s\n' "$FAKE_BASE_PATH"
+    printf 'PublicUrl\t%s\n' "$FAKE_PUBLIC_URL" ;;
 *"acm describe-certificate"*)
     printf '%s\t%s\n' "$FAKE_CERTIFICATE_STATUS" "$FAKE_CERTIFICATE_NAMES" ;;
 *"describe-managed-prefix-lists"*) echo "pl-0cloudfront" ;;
@@ -179,6 +182,8 @@ def fake_deploy(tmp_path):
         base_path="",
         site_url="https://d1example.cloudfront.net",
         mcp_answer="400",
+        public_url="",
+        parameter_keys="CollectionName\tSource\tPublicHttps\tPublicUrl",
     ):
         import os
 
@@ -202,6 +207,8 @@ def fake_deploy(tmp_path):
             "FAKE_BASE_PATH": base_path,
             "FAKE_SITE_URL": site_url,
             "FAKE_MCP_ANSWER": mcp_answer,
+            "FAKE_PUBLIC_URL": public_url,
+            "FAKE_PARAMETER_KEYS": parameter_keys,
         }
         if script != "deploy.sh":
             command = ["bash", str(scripts / script), "demo", *extra]
@@ -377,6 +384,99 @@ def test_changing_the_address_reminds_to_point_mcp_at_it(fake_deploy):
     result, _ = fake_deploy(True, "--https")
     assert result.returncode == 0, result.stderr
     assert "deploy/aws/mcp.sh demo --on" in result.stdout
+
+
+LIBRARY = "https://library.example.org/explorer"
+
+
+def test_mcp_hands_out_links_through_a_public_address_and_keeps_it(fake_deploy):
+    result, log = fake_deploy(
+        True, "--on", "--public-url", LIBRARY + "/", script="mcp.sh"
+    )
+    assert result.returncode == 0, result.stderr
+    kept = [c for c in log if "cloudformation update-stack" in c]
+    assert "--use-previous-template" in kept[0]
+    assert f"ParameterKey=PublicUrl,ParameterValue={LIBRARY}" in kept[0]
+    assert "ParameterKey=PublicHttps,UsePreviousValue=true" in kept[0]
+    sent = [c for c in log if "ssm send-command" in c]
+    assert f"mcp --name demo --on --public-url {LIBRARY}" in sent[0]
+    assert f"claude mcp add --transport http demo {LIBRARY}/mcp" in result.stdout
+
+
+def test_mcp_uses_the_public_address_kept_from_an_earlier_run(fake_deploy):
+    result, log = fake_deploy(True, "--on", script="mcp.sh", public_url=LIBRARY)
+    assert result.returncode == 0, result.stderr
+    assert not [c for c in log if "update-stack" in c]
+    sent = [c for c in log if "ssm send-command" in c]
+    assert f"mcp --name demo --on --public-url {LIBRARY}" in sent[0]
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "javascript:alert(1)",
+        "ftp://library.example.org",
+        "https://library.example.org/$(reboot)",
+    ],
+)
+def test_mcp_refuses_a_public_address_that_is_not_plain_http(fake_deploy, address):
+    result, log = fake_deploy(True, "--on", "--public-url", address, script="mcp.sh")
+    assert result.returncode != 0
+    assert "http:// or https://" in result.stderr
+    assert not [c for c in log if "ssm send-command" in c or "update-stack" in c]
+
+
+def test_an_older_deployment_keeps_its_public_address_through_deploy(fake_deploy):
+    older = "CollectionName\tSource\tPublicHttps"
+    result, log = fake_deploy(
+        True,
+        "--on",
+        "--public-url",
+        LIBRARY,
+        script="mcp.sh",
+        parameter_keys=older,
+    )
+    assert result.returncode != 0
+    assert f"deploy/aws/deploy.sh demo --public-url {LIBRARY} --mcp" in result.stderr
+    assert not [c for c in log if "ssm send-command" in c or "update-stack" in c]
+
+
+def test_deploy_keeps_the_public_address_until_told_to_drop_it(fake_deploy):
+    result, deploys = fake_deploy(True, "--public-url", LIBRARY)
+    assert result.returncode == 0, result.stderr
+    assert f"PublicUrl={LIBRARY}" in deploys[0]
+    assert f"Address in MCP links: none -> {LIBRARY}" in result.stdout
+    assert "deploy/aws/mcp.sh demo --on" in result.stdout
+    result, deploys = fake_deploy(True, "--https", public_url=LIBRARY)
+    assert result.returncode == 0, result.stderr
+    assert f"PublicUrl={LIBRARY}" in deploys[0]
+    assert "deploy/aws/mcp.sh demo --on" not in result.stdout
+    result, deploys = fake_deploy(True, "--no-public-url", public_url=LIBRARY)
+    assert result.returncode == 0, result.stderr
+    assert "PublicUrl= " in deploys[0] + " "
+    assert f"{LIBRARY} -> the site's own" in result.stdout
+    result, deploys = fake_deploy(True, "--public-url", "ftp://library.example.org")
+    assert result.returncode != 0
+    assert deploys == []
+
+
+def test_deploy_turns_mcp_on_with_links_through_the_kept_public_address(
+    fake_deploy, tmp_path
+):
+    result, _ = fake_deploy(True, "--https", "--mcp", public_url=LIBRARY)
+    assert result.returncode == 0, result.stderr
+    switched = [c for c in sent_commands(tmp_path) if "mcp --name demo --on" in c]
+    assert f"--public-url {LIBRARY}" in switched[-1]
+    assert "cloudfront" not in switched[-1]
+
+
+def test_a_change_to_the_public_address_alone_reaches_the_stack_not_the_machine():
+    resources = template_resources()
+    tags = resources["SiteSecurityGroup"]["Properties"]["Tags"]
+    public = {"Key": "dce-public-url", "Value": {"Ref": "PublicUrl"}}
+    assert {"If": ["HasPublicUrl", public, {"Ref": "AWS::NoValue"}]} in tags
+    assert "PublicUrl" not in json.dumps(resources["Instance"])
+    assert "PublicUrl" not in json.dumps(resources["SiteAddress"])
 
 
 RUNNER = """#!/usr/bin/env bash
@@ -664,6 +764,14 @@ def test_bootstrap_configure_changes_limits_and_keeps_the_others(installed_colle
     assert json.loads(saved.read_text()) == {"max_upload_mb": 20, "proxy_hops": 1}
 
 
+def test_bootstrap_configure_sets_the_limit_for_assistants(installed_collection):
+    run, placed = installed_collection
+    result = run("demo", "--set", "mcp_searches_per_minute=30", action="configure")
+    assert result.returncode == 0, result.stderr
+    saved = json.loads(placed.with_name("settings.json").read_text())
+    assert saved == {"mcp_searches_per_minute": 30}
+
+
 def test_bootstrap_configure_refuses_a_setting_it_does_not_know(installed_collection):
     run, placed = installed_collection
     result = run("demo", "--set", "volume=11", action="configure")
@@ -684,6 +792,15 @@ def test_configure_sends_the_new_limits_to_the_machine(fake_deploy):
     assert result.returncode == 0, result.stderr
     sent = [c for c in calls if "ssm send-command" in c][-1]
     assert "configure --name demo --set max_upload_mb=20 --set proxy_hops=1" in sent
+
+
+def test_configure_sends_the_limit_for_assistants_to_the_machine(fake_deploy):
+    result, calls = fake_deploy(
+        True, "--set", "mcp_searches_per_minute=30", script="configure.sh"
+    )
+    assert result.returncode == 0, result.stderr
+    sent = [c for c in calls if "ssm send-command" in c][-1]
+    assert "configure --name demo --set mcp_searches_per_minute=30" in sent
 
 
 def test_configure_refuses_anything_that_is_not_a_number(fake_deploy):

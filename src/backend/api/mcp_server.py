@@ -1,7 +1,8 @@
 import base64
 import binascii
+from ipaddress import ip_address
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Literal, Optional, Set
+from typing import Annotated, Any, Dict, List, Literal, Optional, Set, Tuple
 from urllib.parse import quote, urlsplit
 
 from fastapi import HTTPException
@@ -14,7 +15,11 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from PIL import Image
 from pydantic import BaseModel, Field
-from starlette.routing import BaseRoute
+from starlette.middleware import Middleware
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, Response
+from starlette.routing import BaseRoute, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..core.config import settings
 from ..core.site_settings import site_settings
@@ -27,6 +32,14 @@ MAX_RESULTS = 20
 # Pixels on the shorter side below which a crop holds too little to compare.
 MIN_CROP_PIXELS = 16
 MODES = {"auto": "auto", "appearance": "visual", "catalog": "keyword"}
+SCHEMES = ("http", "https")
+DEFAULT_PORTS = {"http": 80, "https": 443}
+LOOPBACK = ("localhost", "127.0.0.1", "::1")
+UNKNOWN_NAME = (
+    "This site answers MCP requests only at its own address. "
+    "Set DCE_PUBLIC_URL to the address visitors use."
+)
+ANOTHER_SITE = "This site does not answer MCP requests from pages on other sites."
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 Groups = Annotated[
     Optional[List[str]],
@@ -253,6 +266,15 @@ class CollectionSummary(BaseModel):
     example_queries: List[str]
 
 
+def own_origin(request: Request) -> str:
+    """The scheme and host a request reached the site at, as the declared proxies tell"""
+    scheme = (limits.forwarded_value(request, "x-forwarded-proto") or "").lower()
+    if scheme not in SCHEMES:
+        scheme = request.url.scheme
+    host = limits.forwarded_value(request, "x-forwarded-host") or request.url.netloc
+    return f"{scheme}://{host}"
+
+
 def site_address(ctx: Context) -> str:
     """Where the site is reached, so links work outside it"""
     if settings.public_url:
@@ -260,14 +282,14 @@ def site_address(ctx: Context) -> str:
     request = ctx.request_context.request
     if request is None:
         return settings.base_path
-    return f"{request.url.scheme}://{request.url.netloc}{settings.base_path}"
+    return own_origin(request) + settings.base_path
 
 
 async def allow(ctx: Context) -> None:
     request = ctx.request_context.request
     if request is not None:
         try:
-            await limits.limit_searches(request)
+            await limits.limit_assistant_searches(request)
         except HTTPException as refusal:
             raise ToolError(refusal.detail)
 
@@ -610,12 +632,81 @@ async def get_object(
     )
 
 
+def origin_parts(address: str) -> Optional[Tuple[str, str, int]]:
+    """The scheme, host and port of an http or https address, as an Origin names them"""
+    try:
+        parts = urlsplit(address)
+        port = parts.port
+    except ValueError:
+        return None
+    if parts.scheme not in DEFAULT_PORTS or not parts.hostname:
+        return None
+    return parts.scheme, parts.hostname, port or DEFAULT_PORTS[parts.scheme]
+
+
+def known_name(host: str) -> bool:
+    """Names DNS rebinding cannot send: an IP address, localhost, DCE_PUBLIC_URL's host"""
+    try:
+        name = urlsplit(f"//{host}").hostname or ""
+    except ValueError:
+        return False
+    if name == "localhost" or name == urlsplit(settings.public_url).hostname:
+        return True
+    try:
+        ip_address(name)
+    except ValueError:
+        return False
+    return True
+
+
+def allowed_origin(origin: str, request: Request) -> bool:
+    """Pages on this computer and the site's own pages may call the endpoint"""
+    asked = origin_parts(origin)
+    if asked is None:
+        return False
+    if asked[1] in LOOPBACK:
+        return True
+    return asked in {
+        origin_parts(own_origin(request)),
+        origin_parts(settings.public_url),
+    }
+
+
+def refusal(request: Request) -> Optional[Response]:
+    """The answer to a request that DNS rebinding could have sent, if it could have"""
+    host = request.headers.get("host")
+    if host and not site_settings()["proxy_hops"] and not known_name(host):
+        return PlainTextResponse(UNKNOWN_NAME, status_code=421)
+    origin = request.headers.get("origin")
+    if origin is not None and not allowed_origin(origin, request):
+        return PlainTextResponse(ANOTHER_SITE, status_code=403)
+    return None
+
+
+class OwnAddressOnly:
+    """Answer only requests made to the site itself, as the MCP specification asks"""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        turned_away = refusal(Request(scope)) if scope["type"] == "http" else None
+        if turned_away is not None:
+            await turned_away(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+
 def http_routes() -> List[BaseRoute]:
-    """The /mcp endpoint, stateless and answering in plain JSON, for any host"""
-    return server.streamable_http_app(
+    """The /mcp endpoint, stateless and answering in plain JSON, at the site's address"""
+    app = server.streamable_http_app(
         stateless_http=True,
         json_response=True,
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=False
         ),
-    ).routes
+    )
+    return [
+        Route(route.path, route.endpoint, middleware=[Middleware(OwnAddressOnly)])
+        for route in app.routes
+    ]

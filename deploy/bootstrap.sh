@@ -60,7 +60,8 @@ describe options:
 
 configure options:
   --set KEY=VALUE     change a limit of a running site. No restart needed. Repeatable.
-                      max_upload_mb, searches_per_minute, concurrent_searches, proxy_hops
+                      max_upload_mb, searches_per_minute, mcp_searches_per_minute,
+                      concurrent_searches, proxy_hops
 
 mcp options:
   --on                answer AI assistants at /mcp. The site restarts, which takes a minute

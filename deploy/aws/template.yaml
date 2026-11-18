@@ -14,7 +14,7 @@ Metadata:
       - Label: {default: Spending alert}
         Parameters: [MonthlyBudgetUsd, BudgetEmail]
       - Label: {default: Advanced}
-        Parameters: [BasePath, Image, BootstrapUrl, MachineImageId, CloudFrontPrefixList]
+        Parameters: [BasePath, PublicUrl, Image, BootstrapUrl, MachineImageId, CloudFrontPrefixList]
 
 Parameters:
   CollectionName:
@@ -104,6 +104,15 @@ Parameters:
     Description: >-
       Serve the site under this path, such as /explorer, for a website of your own
       whose proxy forwards that path here. Set only when the machine is created.
+  PublicUrl:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^https?://[A-Za-z0-9.:/_~-]+$"
+    MaxLength: 256
+    Description: >-
+      The address visitors use, such as https://library.example.org/explorer, when a
+      website of your own serves the site under a path. The links that MCP hands out
+      lead through it. Changing it never touches the machine.
   Image:
     Type: String
     Default: ghcr.io/l4cch/digital-collections-explorer:latest
@@ -145,6 +154,7 @@ Conditions:
   UsesHttps: !Equals [!Ref PublicHttps, "true"]
   HasDomain: !Not [!Equals [!Ref Domain, ""]]
   HasBasePath: !Not [!Equals [!Ref BasePath, ""]]
+  HasPublicUrl: !Not [!Equals [!Ref PublicUrl, ""]]
   IsUsEast1: !Equals [!Ref "AWS::Region", us-east-1]
   HasBudget: !And
     - !Not [!Equals [!Ref MonthlyBudgetUsd, 0]]
@@ -168,6 +178,7 @@ Resources:
             CidrIp: !Ref AllowedCidr
       Tags:
         - {Key: dce-collection, Value: !Ref CollectionName}
+        - !If [HasPublicUrl, {Key: dce-public-url, Value: !Ref PublicUrl}, !Ref "AWS::NoValue"]
 
   InstanceRole:
     Type: AWS::IAM::Role
