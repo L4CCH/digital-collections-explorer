@@ -62,20 +62,25 @@ class FileRef:
     is_document: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
     size_known: bool = True
+    name: str = ""
 
     @property
     def basename(self) -> str:
-        return self.key.rsplit("/", 1)[-1]
+        return (self.name or self.key).rsplit("/", 1)[-1]
 
     @property
     def parts(self) -> list[str]:
-        return self.key.split("/")[:-1]
+        return (self.name or self.key).split("/")[:-1]
 
 
 def classify(
-    key: str, size: int, extra: dict | None = None, size_known: bool = True
+    key: str,
+    size: int,
+    extra: dict | None = None,
+    size_known: bool = True,
+    name: str = "",
 ) -> FileRef:
-    base = key.rsplit("/", 1)[-1]
+    base = (name or key).rsplit("/", 1)[-1]
     ext = base.rsplit(".", 1)[-1].lower() if "." in base else ""
     junk = base.lower() in JUNK_NAMES or base.startswith("._")
     return FileRef(
@@ -87,7 +92,16 @@ def classify(
         is_document=ext in DOCUMENT_EXTS,
         extra=extra or {},
         size_known=size_known,
+        name=name,
     )
+
+
+def web_names(url: str) -> tuple[str, str]:
+    parts = urlparse(url)
+    path = unquote(parts.path).lstrip("/")
+    host = f"{parts.hostname or ''}{f':{parts.port}' if parts.port else ''}"
+    key = f"{host}/{path}"
+    return (f"{key}?{parts.query}" if parts.query else key), path
 
 
 def once_each(refs) -> tuple[list[FileRef], list[FileRef]]:
@@ -402,7 +416,7 @@ class ParquetManifestSource(Source):
             url, named_by_service = self._address(row)
             if url is None:
                 continue
-            key = unquote(urlparse(url).path).lstrip("/") if "://" in url else url
+            key, name = web_names(url) if "://" in url else (url, "")
             given = values[size_index] if size_index is not None else None
             size = int(given or 0)
             extra = {"url": url, "row": row, "named_by_service": named_by_service}
@@ -412,11 +426,12 @@ class ParquetManifestSource(Source):
                     extra["iiif"] = info.removesuffix("/info.json")
             if vectors and vectors[index] is not None:
                 extra["vector"] = vectors[index]
-            yield classify(key, size, extra, size_known=given not in (None, ""))
+            known = given not in (None, "")
+            yield classify(key, size, extra, size_known=known, name=name)
 
     def read_bytes(self, ref, limit=None):
         if self.s3 is not None:
-            request = {"Bucket": self.s3_bucket, "Key": ref.key}
+            request = {"Bucket": self.s3_bucket, "Key": ref.name or ref.key}
             if limit:
                 request["Range"] = f"bytes=0-{limit - 1}"
             try:
@@ -472,7 +487,7 @@ class ParquetManifestSource(Source):
 
     def original_uri(self, ref):
         if self.s3_bucket:
-            return f"s3://{self.s3_bucket}/{ref.key}"
+            return f"s3://{self.s3_bucket}/{ref.name or ref.key}"
         url = ref.extra.get("url", ref.key)
         return self._local_file(url) or url
 

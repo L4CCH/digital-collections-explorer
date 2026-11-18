@@ -1,5 +1,6 @@
 import io
 import json
+import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -7,6 +8,7 @@ import duckdb
 import pytest
 from PIL import Image
 
+from src.backend.core.formats import INGEST_STATE_FILE
 from src.backend.services.catalog_fields import image_source, image_urls
 from src.ingest.pipeline import Options, make_item_id, run
 from src.ingest.state import IngestState
@@ -196,6 +198,65 @@ def test_the_profile_does_not_call_images_of_unknown_size_broken(server, tmp_pat
     assert "3 images; the manifest does not give their sizes" in report
     assert "in total" not in report
     assert "Index a few hundred with --limit" in report
+
+
+def test_files_at_one_path_on_two_servers_or_queries_stay_apart(server, tmp_path):
+    port = server[0].rsplit(":", 1)[1]
+    keys = [
+        f"127.0.0.1:{port}/img/1.jpg",
+        f"localhost:{port}/img/1.jpg",
+        f"127.0.0.1:{port}/img/2.jpg?v=1",
+        f"127.0.0.1:{port}/img/2.jpg?v=2",
+    ]
+    source = manifest(tmp_path, ["image_url"], [[f"http://{key}"] for key in keys])
+    refs = list(source.iter_files())
+    assert [ref.key for ref in refs] == keys
+    assert {(ref.basename, ref.ext, tuple(ref.parts)) for ref in refs} == {
+        ("1.jpg", "jpg", ("img",)),
+        ("2.jpg", "jpg", ("img",)),
+    }
+    metadata, _ = indexed(source, tmp_path, "copy")
+    assert len(metadata) == 4
+
+
+def test_files_fetched_through_s3_are_read_by_their_path(tmp_path):
+    source = manifest(tmp_path, ["image_url"], [["https://ids.example.org/img/1.jpg"]])
+    asked = []
+
+    class Bucket:
+        def get_object(self, Bucket, Key):
+            asked.append((Bucket, Key))
+            return {"Body": io.BytesIO(jpeg((10, 10)))}
+
+    source.s3, source.s3_bucket = Bucket(), "bucket"
+    (ref,) = source.iter_files()
+    assert source.read_bytes(ref) and asked == [("bucket", "img/1.jpg")]
+    assert source.original_uri(ref) == "s3://bucket/img/1.jpg"
+
+
+def test_web_files_indexed_when_only_the_path_counted_are_not_indexed_again(
+    server, tmp_path, monkeypatch, capsys
+):
+    manifest(tmp_path, ["image_url"], [[f"{server[0]}/img/{n}.jpg"] for n in range(2)])
+    assert ingest(tmp_path, monkeypatch)[0] == 0
+    embeddings = tmp_path / "site" / "embeddings"
+    state = sqlite3.connect(embeddings / INGEST_STATE_FILE)
+    for item_id, key in state.execute("SELECT id, key FROM items").fetchall():
+        path = key.split("/", 1)[1]
+        state.execute(
+            "UPDATE items SET id=?, key=? WHERE id=?",
+            (make_item_id(path), path, item_id),
+        )
+    state.execute("DELETE FROM facts WHERE name = 'web_keys'")
+    state.commit()
+    state.close()
+    capsys.readouterr()
+    assert ingest(tmp_path, monkeypatch)[0] == 0
+    out = capsys.readouterr().out
+    assert "Kept 2 web files indexed by an earlier version" in out
+    assert "2 already indexed, 0 to go." in out
+    con = sqlite3.connect(embeddings / "metadata.sqlite")
+    assert con.execute("SELECT count(*) FROM items").fetchone() == (2,)
 
 
 def test_going_on_with_another_images_mode_is_refused(tmp_path, monkeypatch, capsys):

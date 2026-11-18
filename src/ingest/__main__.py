@@ -205,6 +205,22 @@ def repeated_note(kept: list, again: list) -> str:
     return note
 
 
+def kept_by_path(state: IngestState, refs: list) -> int:
+    pairs = [
+        (make_item_id(ref.name), make_item_id(ref.key), ref.key)
+        for ref in refs
+        if ref.name and ref.name != ref.key
+    ]
+    present = state.present([old for old, _, _ in pairs] + [new for _, new, _ in pairs])
+    moves, taken = [], set()
+    for old, new, key in pairs:
+        if old in present and new not in present and old not in taken:
+            moves.append((old, new, key))
+            taken.add(old)
+    state.rekey(moves)
+    return len(moves)
+
+
 def readable_files(refs: list) -> tuple[list, str | None]:
     """The files this install can read, and how many PDFs it has to leave out"""
     documents = sum(1 for ref in refs if ref.is_document)
@@ -320,6 +336,15 @@ def main() -> int:
         if refused:
             state.close()
             return 2
+
+    if state.fact("web_keys") != "host":
+        kept = kept_by_path(state, refs)
+        if kept:
+            print(
+                f"Kept {counted(kept, 'web file', 'web files')} indexed by an earlier "
+                "version, which named them by their path alone; none is indexed again."
+            )
+        state.remember("web_keys", "host")
 
     ids = [make_item_id(ref.key) for ref in refs]
     state.seed([(item_id, ref.key, ref.size) for item_id, ref in zip(ids, refs)])

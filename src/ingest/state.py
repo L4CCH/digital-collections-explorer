@@ -101,6 +101,24 @@ class IngestState:
             finished.update(row[0] for row in rows)
         return finished
 
+    def present(self, ids: list[str]) -> set[str]:
+        found: set[str] = set()
+        for start in range(0, len(ids), SQL_PARAMETER_CHUNK):
+            chunk = ids[start : start + SQL_PARAMETER_CHUNK]
+            rows = self.con.execute(
+                f"SELECT id FROM items WHERE id IN ({','.join('?' * len(chunk))})",
+                chunk,
+            )
+            found.update(row[0] for row in rows)
+        return found
+
+    def rekey(self, moves: list[tuple[str, str, str]]) -> None:
+        self.con.executemany(
+            "UPDATE items SET id=?, key=? WHERE id=?",
+            [(new, key, old) for old, new, key in moves],
+        )
+        self.con.commit()
+
     def record(self, result: Result) -> None:
         if result.page_key is not None:
             self.con.execute(
