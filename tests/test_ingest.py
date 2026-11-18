@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -94,6 +95,30 @@ def test_output_is_a_collection_the_site_reads(collection):
         for kind in ("original", "processed", "thumbnail"):
             assert os.path.exists(item["paths"][kind])
     assert not (embeddings_dir / "embeddings.pt").exists()
+
+
+def test_ingest_records_the_revision_of_its_model(collection, tmp_path, monkeypatch):
+    from src.ingest import __main__ as command
+
+    class Service(FakeService):
+        model_name = "google/siglip2-base-patch16-224"
+        device = "cpu"
+
+    for name in ("data_dir", "embeddings_dir", "thumbnails_dir", "processed_data_dir"):
+        monkeypatch.setattr(command.settings, name, getattr(command.settings, name))
+    monkeypatch.setattr(command.settings, "device", command.settings.device)
+    monkeypatch.setattr(command.settings, "model_revision", "75de2d55ec2d")
+    monkeypatch.setattr(command, "create_embedding_service", Service)
+    monkeypatch.setattr(command, "cloud_machine_type", lambda: None)
+    data_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["ingest", collection, "--data-dir", str(data_dir), "--device", "cpu"],
+    )
+    assert command.main() == 0
+    info = json.loads((data_dir / "embeddings" / "index_info.json").read_text())
+    assert info["models"][0]["revision"] == "75de2d55ec2d"
 
 
 def test_same_file_name_in_two_folders_does_not_collide(collection):
