@@ -20,7 +20,15 @@ from src.profiling.sources import open_source
 
 from .documents import INSTALL_HINT, can_read_pdfs
 from .export import write_from_state
-from .pipeline import IMAGE_MODES, Options, clock, kept_root, make_item_id, run
+from .pipeline import (
+    IMAGE_MODES,
+    Options,
+    clock,
+    given_vectors_check,
+    kept_root,
+    make_item_id,
+    run,
+)
 from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
 
@@ -294,6 +302,13 @@ def main() -> int:
             max_inflight_bytes=int(args.max_inflight_mb * 1024**2),
             images=args.images,
         )
+        checked = given_vectors_check(source, pending, service, options)
+        if checked:
+            accepted, message = checked
+            print(message)
+            if not accepted:
+                state.close()
+                return 2
         try:
             stats, budget = run(source, pending, service, state, options)
         except KeyboardInterrupt:

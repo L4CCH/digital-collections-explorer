@@ -121,6 +121,20 @@ def test_link_keeps_nothing_when_the_service_can_show_every_size(server, tmp_pat
     }
 
 
+def test_link_reads_only_the_size_of_an_image_whose_vector_is_given(server, tmp_path):
+    address, asked = server
+    service = f"{address}/iiif/map-1"
+    path = tmp_path / "manifest.parquet"
+    duckdb.execute(
+        f"COPY (SELECT '{service}' AS iiif, [0.6, 0.8, 0.0, 0.0]::FLOAT[] AS vector) "
+        f"TO '{path}' (FORMAT PARQUET)"
+    )
+    (metadata,), data_dir = indexed(ParquetManifestSource(str(path)), tmp_path, "link")
+    assert asked == ["/iiif/map-1/info.json"]
+    assert (metadata["width"], metadata["height"]) == ORIGINAL
+    assert not (data_dir / "thumbnails").exists()
+
+
 def test_link_uses_the_sources_own_thumbnail_and_image_addresses(server, tmp_path):
     address, _ = server
     source = manifest(

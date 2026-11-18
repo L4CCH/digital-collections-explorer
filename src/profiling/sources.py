@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import unquote, urlparse
 
+import numpy as np
 from pi_heif import register_heif_opener
 
 from src.backend.core.catalog_keys import IIIF_KEYS
@@ -30,6 +31,7 @@ IMAGE_EXTS = {
 }
 BROWSER_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "avif"}
 DOCUMENT_EXTS = {"pdf"}
+VECTOR_COLUMN = "vector"
 MODEL_EXTS = {"glb", "gltf"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini", ".picasa.ini"}
 JUNK_DIRS = {".git", "__pycache__", ".cache", "node_modules", ".thumbnails"}
@@ -261,12 +263,16 @@ class ParquetManifestSource(Source):
         )
         self.con = duckdb.connect()
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
-        self.columns = [
+        described = [
             row[0]
             for row in self.con.execute(
                 f"DESCRIBE SELECT * FROM read_parquet('{self.local_path}')"
             ).fetchall()
         ]
+        self.vector_column = next(
+            (column for column in described if column.lower() == VECTOR_COLUMN), None
+        )
+        self.columns = [column for column in described if column != self.vector_column]
         self.url_column = url_column or self._guess(URL_COLUMN_GUESSES)
         self.iiif_column = self._guess(IIIF_KEYS)
         self.size_column = size_column or self._guess(SIZE_COLUMN_GUESSES)
@@ -280,6 +286,7 @@ class ParquetManifestSource(Source):
             self.s3_bucket = urlparse(fetch_via).netloc
             self.s3 = s3_client(anonymous, region)
         self._rows: list[tuple] | None = None
+        self._vectors: list[np.ndarray | None] | None = None
 
     @staticmethod
     def _local_copy(path: str, anonymous: bool, region: str) -> str:
@@ -308,10 +315,27 @@ class ParquetManifestSource(Source):
 
     def _load(self) -> list[tuple]:
         if self._rows is None:
+            left_out = (
+                f' EXCLUDE ("{self.vector_column}")' if self.vector_column else ""
+            )
             self._rows = self.con.execute(
-                f"SELECT * FROM read_parquet('{self.local_path}')"
+                f"SELECT *{left_out} FROM read_parquet('{self.local_path}')"
             ).fetchall()
         return self._rows
+
+    def vectors(self) -> list[np.ndarray | None]:
+        if self._vectors is None:
+            self._vectors = []
+            if self.vector_column:
+                column = self.con.execute(
+                    f'SELECT "{self.vector_column}" '
+                    f"FROM read_parquet('{self.local_path}')"
+                ).fetchnumpy()[self.vector_column]
+                self._vectors = [
+                    None if value is np.ma.masked else np.asarray(value, np.float32)
+                    for value in column
+                ]
+        return self._vectors
 
     def describe(self):
         return {
@@ -321,6 +345,7 @@ class ParquetManifestSource(Source):
             "url_column": self.url_column,
             "iiif_column": self.iiif_column,
             "size_column": self.size_column,
+            "vector_column": self.vector_column,
             "fetch_via": f"s3://{self.s3_bucket}" if self.s3_bucket else None,
         }
 
@@ -337,7 +362,8 @@ class ParquetManifestSource(Source):
 
     def iter_files(self):
         size_index = self.columns.index(self.size_column) if self.size_column else None
-        for values in self._load():
+        vectors = self.vectors()
+        for index, values in enumerate(self._load()):
             row = dict(zip(self.columns, values))
             url, named_by_service = self._address(row)
             if url is None:
@@ -345,6 +371,8 @@ class ParquetManifestSource(Source):
             key = unquote(urlparse(url).path).lstrip("/") if "://" in url else url
             size = int(values[size_index] or 0) if size_index is not None else 0
             extra = {"url": url, "row": row, "named_by_service": named_by_service}
+            if vectors and vectors[index] is not None:
+                extra["vector"] = vectors[index]
             yield classify(key, size, extra)
 
     def read_bytes(self, ref, limit=None):
