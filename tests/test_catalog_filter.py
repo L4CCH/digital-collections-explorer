@@ -72,6 +72,22 @@ def test_any_value_of_one_category_is_enough_and_case_does_not_matter(catalog):
     }
 
 
+def test_case_does_not_matter_for_letters_beyond_ascii(catalog):
+    con = sqlite3.connect(catalog)
+    con.executemany(
+        "INSERT INTO record_facets VALUES (?, ?, ?)",
+        [("rec-b", "place", "Österreich"), ("rec-c", "place", "Égypte")],
+    )
+    con.commit()
+    con.close()
+    for spelled in ("Österreich", "österreich", "ÖSTERREICH"):
+        assert matching_records(catalog, {"place": [spelled]}) == {"rec-b"}
+    assert matching_records(catalog, {"place": ["égypte"]}) == {"rec-c"}
+    assert catalog_values(catalog, "place", contains="ÉGYP") == [
+        {"value": "Égypte", "records": 1}
+    ]
+
+
 def test_every_category_asked_for_must_match(catalog):
     wanted = {"place": ["England"], "object_type": ["Ceramics"]}
     assert matching_records(catalog, wanted) == {"rec-c"}
