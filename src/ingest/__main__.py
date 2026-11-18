@@ -401,12 +401,15 @@ def main() -> int:
             if not accepted:
                 state.close()
                 return 2
+        state.run_started()
         try:
             stats, budget = run(source, pending, service, state, options)
         except KeyboardInterrupt:
+            state.run_ended()
             print("\n\nStopped. Progress is saved. Run the same command to continue.")
             state.close()
             return 130
+        state.run_ended()
         elapsed = max(time.time() - started, 1e-6)
         print(
             f"\n\nIndexed {stats.done:,}, skipped {stats.skipped:,}, failed {stats.failed:,} "

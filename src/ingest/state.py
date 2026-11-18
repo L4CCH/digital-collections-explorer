@@ -75,6 +75,18 @@ class IngestState:
         self.con.execute("INSERT OR REPLACE INTO facts VALUES (?, ?)", (name, value))
         self.con.commit()
 
+    def runs(self) -> list[list]:
+        return json.loads(self.fact("runs") or "[]")
+
+    def run_started(self) -> None:
+        self.remember("runs", json.dumps(self.runs() + [[time.time(), None]]))
+
+    def run_ended(self) -> None:
+        runs = self.runs()
+        if runs:
+            runs[-1][1] = time.time()
+            self.remember("runs", json.dumps(runs))
+
     def stored_dimensions(self) -> int | None:
         row = self.con.execute(
             "SELECT length(embedding) FROM items WHERE embedding IS NOT NULL LIMIT 1"

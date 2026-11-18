@@ -262,6 +262,28 @@ def test_time_spent_leaves_out_the_pause_between_two_runs():
     assert active_seconds([], first_item_seconds=0) == 0
 
 
+def test_time_spent_counts_each_run_from_its_start_to_its_end():
+    from src.ingest.report import active_seconds
+
+    runs = [[1000.0, 1100.0], [1600.0, None]]
+    finish_times = [1010, 1090, 1620, 2200]
+    assert active_seconds(finish_times, 5, runs) == 100 + 600
+    assert active_seconds([400, 410] + finish_times, 5, runs) == 5 + 10 + 100 + 600
+
+
+def test_each_run_that_indexes_records_its_start_and_end(tmp_path, monkeypatch):
+    from src.backend.core.formats import INGEST_STATE_FILE
+    from tests.test_related import collection, ingest
+
+    collection(tmp_path)
+    assert ingest(tmp_path, monkeypatch, None, "--limit", "1")[0] == 0
+    assert ingest(tmp_path, monkeypatch)[0] == 0
+    assert ingest(tmp_path, monkeypatch)[0] == 0
+    state = IngestState(str(tmp_path / "site" / "embeddings" / INGEST_STATE_FILE), 1)
+    runs = state.runs()
+    assert len(runs) == 2 and all(start <= end for start, end in runs)
+
+
 def test_report_can_be_rebuilt_from_a_finished_collection(collection):
     from src.ingest.report import render_report, run_report
 
