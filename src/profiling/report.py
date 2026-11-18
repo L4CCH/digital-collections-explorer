@@ -27,12 +27,22 @@ def human_time(seconds: float) -> str:
     return f"{seconds / 3600:.1f} hours"
 
 
+def size_line(scan) -> str:
+    images = f"  {scan.image_files:,} images"
+    sized = scan.image_files - scan.images_without_size
+    if not scan.images_without_size:
+        return f"{images}, {human_bytes(scan.total_bytes)} in total"
+    if not sized:
+        return f"{images}; the manifest does not give their sizes"
+    return (
+        f"{images}; {human_bytes(scan.total_bytes)} in total for the {sized:,} "
+        "whose sizes the manifest gives"
+    )
+
+
 def overview_lines(p: CollectionProfile) -> list[str]:
     scan = p.scan
-    lines = [
-        "",
-        f"  {scan.image_files:,} images, {human_bytes(scan.total_bytes)} in total",
-    ]
+    lines = ["", size_line(scan)]
     if scan.size_percentiles:
         sizes = scan.size_percentiles
         lines.append(
@@ -279,10 +289,11 @@ def sizing_lines(p: CollectionProfile) -> list[str]:
             f"      Analysing the images alone takes about "
             f"{human_time(seconds['compute'])} (on {sizing.device})"
         )
-        lines.append(
-            "      WARNING: download speed could not be measured. "
-            "The real time may be far longer."
-        )
+        lines += [
+            "      WARNING: this leaves out downloading the images, which could not be",
+            "      timed here and may take far longer. Index a few hundred with --limit",
+            "      to time it.",
+        ]
     if sizing.source_bytes > LARGE_SOURCE_BYTES:
         lines.append(
             f"      On a cloud machine next to the data: about "

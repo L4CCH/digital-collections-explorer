@@ -51,6 +51,7 @@ class Result:
     metadata: dict[str, Any] = field(default_factory=dict)
     embedding: bytes | None = None
     page_key: str | None = None
+    bytes_read: int | None = None
 
 
 class IngestState:
@@ -108,13 +109,14 @@ class IngestState:
             )
         self.con.execute(
             "UPDATE items SET status=?, error=?, elapsed_ms=?, metadata=?, embedding=?, "
-            "updated_at=datetime('now') WHERE id=?",
+            "size_bytes=COALESCE(?, size_bytes), updated_at=datetime('now') WHERE id=?",
             (
                 result.status,
                 result.error,
                 result.elapsed_ms,
                 json.dumps(result.metadata, default=str) if result.metadata else None,
                 result.embedding,
+                result.bytes_read,
                 result.item_id,
             ),
         )

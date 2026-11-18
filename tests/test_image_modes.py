@@ -12,6 +12,7 @@ from src.ingest.pipeline import Options, make_item_id, run
 from src.ingest.state import IngestState
 from src.profiling.models import FieldProfile
 from src.profiling.profiler import image_decision, profile_collection
+from src.profiling.report import render
 from src.profiling.sources import ParquetManifestSource
 from tests.test_ingest import FakeService
 
@@ -82,6 +83,10 @@ def indexed(source, tmp_path, images):
     return [metadata for _, _, metadata in state.done_rows()], data_dir
 
 
+def read_from(data_dir):
+    return IngestState(str(data_dir / "embeddings" / "state.sqlite"), 1).bytes_read()
+
+
 def test_copies_are_cut_from_the_size_the_iiif_service_is_asked_for(server, tmp_path):
     address, asked = server
     source = manifest(tmp_path, ["iiif"], [[f"{address}/iiif/map-1"]])
@@ -119,6 +124,7 @@ def test_link_keeps_nothing_when_the_service_can_show_every_size(server, tmp_pat
         "thumbnail": f"{service}/full/!400,400/0/default.jpg",
         "full": f"{service}/full/!1920,1920/0/default.jpg",
     }
+    assert read_from(data_dir) == len(jpeg((448, 298)))
 
 
 def test_link_reads_only_the_size_of_an_image_whose_vector_is_given(server, tmp_path):
@@ -133,6 +139,7 @@ def test_link_reads_only_the_size_of_an_image_whose_vector_is_given(server, tmp_
     assert asked == ["/iiif/map-1/info.json"]
     assert (metadata["width"], metadata["height"]) == ORIGINAL
     assert not (data_dir / "thumbnails").exists()
+    assert read_from(data_dir) == 0
 
 
 def test_link_uses_the_sources_own_thumbnail_and_image_addresses(server, tmp_path):
@@ -176,6 +183,18 @@ def test_the_profile_reads_only_the_size_of_images_an_iiif_service_names(
     assert (profile.scan.sampled, width["p50"]) == (3, ORIGINAL[0])
     assert profile.directory_signals == [] and profile.name_patterns == []
     assert profile.field("iiif").note == ""
+
+
+def test_the_profile_does_not_call_images_of_unknown_size_broken(server, tmp_path):
+    address, _ = server
+    rows = [[f"{address}/iiif/map-{n}"] for n in range(3)]
+    profile = profile_collection(manifest(tmp_path, ["iiif"], rows), "maps", sample=3)
+    assert (profile.scan.images_without_size, profile.scan.size_percentiles) == (3, {})
+    assert all(issue.kind != "tiny_image" for issue in profile.scan.issues)
+    report = render(profile)
+    assert "3 images; the manifest does not give their sizes" in report
+    assert "in total" not in report
+    assert "Index a few hundred with --limit" in report
 
 
 def test_the_profile_asks_what_to_keep_only_when_the_source_can_show_images():

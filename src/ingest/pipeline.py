@@ -95,6 +95,7 @@ class Item:
     origin: Origin = field(default_factory=Origin)
     original_size: tuple[int, int] | None = None
     vector: np.ndarray | None = None
+    bytes_read: int | None = None
 
 
 @dataclass
@@ -145,6 +146,7 @@ class Document:
                     "file_name": self.item.ref.basename,
                     "pages": self.pages,
                 },
+                bytes_read=self.item.bytes_read,
             )
         )
 
@@ -222,6 +224,7 @@ def failure(item: Item, stage: str, error: Exception) -> Result:
         describe_error(stage, error),
         elapsed_ms(item),
         page_key=item.page_key,
+        bytes_read=item.bytes_read,
     )
 
 
@@ -243,6 +246,7 @@ def done(item: Item, vector) -> Result:
         item.metadata,
         kept.tobytes(),
         item.page_key,
+        item.bytes_read,
     )
 
 
@@ -291,6 +295,7 @@ def download_worker(
         if item is None:
             return
         item.started = time.time()
+        item.bytes_read = 0
         if shown_from_its_service(item, options):
             try:
                 size = iiif_size(item.origin.service)
@@ -306,8 +311,9 @@ def download_worker(
             item.blob = read_image(source, options, item)
             if item.blob is None:
                 raise IOError("the file could not be read from the source")
+            item.bytes_read = len(item.blob)
             with stats.lock:
-                stats.bytes_in += len(item.blob)
+                stats.bytes_in += item.bytes_read
             outbox.put(item)
         except Exception as error:
             budget.release(item.reserved)

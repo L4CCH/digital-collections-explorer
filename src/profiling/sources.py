@@ -61,6 +61,7 @@ class FileRef:
     is_junk: bool = False
     is_document: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+    size_known: bool = True
 
     @property
     def basename(self) -> str:
@@ -71,7 +72,9 @@ class FileRef:
         return self.key.split("/")[:-1]
 
 
-def classify(key: str, size: int, extra: dict | None = None) -> FileRef:
+def classify(
+    key: str, size: int, extra: dict | None = None, size_known: bool = True
+) -> FileRef:
     base = key.rsplit("/", 1)[-1]
     ext = base.rsplit(".", 1)[-1].lower() if "." in base else ""
     junk = base.lower() in JUNK_NAMES or base.startswith("._")
@@ -83,6 +86,7 @@ def classify(key: str, size: int, extra: dict | None = None) -> FileRef:
         is_junk=junk,
         is_document=ext in DOCUMENT_EXTS,
         extra=extra or {},
+        size_known=size_known,
     )
 
 
@@ -378,7 +382,8 @@ class ParquetManifestSource(Source):
             if url is None:
                 continue
             key = unquote(urlparse(url).path).lstrip("/") if "://" in url else url
-            size = int(values[size_index] or 0) if size_index is not None else 0
+            given = values[size_index] if size_index is not None else None
+            size = int(given or 0)
             extra = {"url": url, "row": row, "named_by_service": named_by_service}
             if self.iiif_column:
                 info = iiif_info_from({self.iiif_column: row.get(self.iiif_column)})
@@ -386,7 +391,7 @@ class ParquetManifestSource(Source):
                     extra["iiif"] = info.removesuffix("/info.json")
             if vectors and vectors[index] is not None:
                 extra["vector"] = vectors[index]
-            yield classify(key, size, extra)
+            yield classify(key, size, extra, size_known=given not in (None, ""))
 
     def read_bytes(self, ref, limit=None):
         if self.s3 is not None:

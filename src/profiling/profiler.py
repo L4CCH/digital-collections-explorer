@@ -241,6 +241,7 @@ def scan(
         elif ref.is_image:
             stats.image_files += 1
             stats.total_bytes += ref.size
+            stats.images_without_size += 0 if ref.size_known else 1
             stats.formats[ref.ext] = stats.formats.get(ref.ext, 0) + 1
             stats.format_bytes[ref.ext] = stats.format_bytes.get(ref.ext, 0) + ref.size
             images.append(ref)
@@ -254,7 +255,7 @@ def scan(
         if max_files and stats.total_files >= max_files:
             break
 
-    sizes = [ref.size for ref in images]
+    sizes = [ref.size for ref in images if ref.size_known]
     stats.size_percentiles = percentiles(sizes)
     stats.catalog_candidates = [
         catalog_candidate(ref) for ref in catalogs[:MAX_CATALOG_CANDIDATES]

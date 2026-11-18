@@ -83,6 +83,7 @@ class ScanStats(BaseModel):
     non_image_files: int = 0
     unreadable_files: int = 0
     total_bytes: int = 0
+    images_without_size: int = 0
     formats: dict[str, int] = Field(default_factory=dict)
     format_bytes: dict[str, int] = Field(default_factory=dict)
     size_percentiles: dict[str, int] = Field(default_factory=dict)
