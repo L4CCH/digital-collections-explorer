@@ -1,5 +1,3 @@
-"""Check a collection package, the Data Package a source plugin writes, and build from it."""
-
 from __future__ import annotations
 
 import json
@@ -117,7 +115,6 @@ EXAMPLES = 3
 
 @dataclass
 class Report:
-    """What check found: what refuses a package, what is worth knowing, what it holds"""
 
     problems: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -130,7 +127,6 @@ class Report:
 
 @dataclass
 class Shard:
-    """One file of a model's vectors, with the id of the file in each row"""
 
     path: str
     ids: list[str]
@@ -139,7 +135,6 @@ class Shard:
 
 @dataclass
 class Package:
-    """The tables, vectors and description a package holds"""
 
     folder: Path
     producer: dict[str, str]
@@ -154,7 +149,6 @@ class Package:
 
 
 class Refused(Exception):
-    """A package, or a collection folder, that build will not write from or into"""
 
     def __init__(self, problems: list[str]):
         super().__init__(" ".join(problems))
@@ -166,7 +160,6 @@ def plural(count: int, noun: str, nouns: str | None = None) -> str:
 
 
 def listed(values, conjunction: str = "and") -> str:
-    """Values as a sentence lists them, with the serial comma"""
     values = [str(value) for value in values]
     if len(values) < 3:
         return f" {conjunction} ".join(values)
@@ -174,7 +167,6 @@ def listed(values, conjunction: str = "and") -> str:
 
 
 def the(noun: str, values) -> str:
-    """Values after their noun: the facet date, or the facets date and name"""
     values = list(values)
     return f"the {noun if len(values) == 1 else noun + 's'} {listed(values)}"
 
@@ -189,7 +181,6 @@ def present(value: Any) -> Any:
 
 
 def inside(path: Any) -> bool:
-    """Whether a path names a file inside the package, as the standard writes one"""
     if not isinstance(path, str) or not path or "\\" in path or "://" in path:
         return False
     return (
@@ -211,7 +202,6 @@ def read_descriptor(folder: Path) -> tuple[dict | None, str | None]:
 
 
 def contract_problem(contract: Any) -> str | None:
-    """Why this DCE cannot read a package of this contract, if it cannot"""
     reads = f"This DCE reads collection package contract {CONTRACT}"
     if type(contract) is int and contract == CONTRACT:
         return None
@@ -230,7 +220,6 @@ def contract_problem(contract: Any) -> str | None:
 
 
 def producer_of(producer: Any, report: Report) -> dict[str, str] | None:
-    """The plugin that wrote the package, and its version and address"""
     named = isinstance(producer, dict) and all(
         isinstance(producer.get(key), str) and producer[key].strip()
         for key in ("name", "version")
@@ -290,7 +279,6 @@ def resource_problems(name: str, resource: dict) -> list[str]:
 
 
 def read_resources(descriptor: dict, report: Report) -> dict[str, dict]:
-    """The tables a package lists, by name"""
     resources = descriptor.get("resources")
     if not isinstance(resources, list) or not resources:
         report.problems.append(
@@ -365,7 +353,6 @@ def model_problems(key: str, entry: dict) -> list[str]:
 
 
 def read_models(dce: dict, report: Report) -> tuple[list[Model], dict[str, list[str]]]:
-    """The models a package holds vectors from, and the files of each one's vectors"""
     entries = dce.get("models")
     if not isinstance(entries, list) or not entries:
         report.problems.append(
@@ -426,7 +413,6 @@ def read_table(path: Path) -> tuple[list[str], list[dict]]:
 
 
 def schema_problems(name: str, path: str, fields: list, columns: list) -> list[str]:
-    """How a table's Table Schema differs from the columns of its file"""
     named = [f["name"] for f in fields]
     if named == columns:
         return []
@@ -450,7 +436,6 @@ def schema_problems(name: str, path: str, fields: list, columns: list) -> list[s
 
 
 def read_tables(folder: Path, resources: dict[str, dict], report: Report):
-    """Each table's columns and rows, with None for a table the package does not give"""
     tables: dict[str, list[dict] | None] = dict.fromkeys(REQUIRED)
     columns: dict[str, list[str]] = {}
     for name, resource in resources.items():
@@ -480,7 +465,6 @@ def read_tables(folder: Path, resources: dict[str, dict], report: Report):
 
 
 def read_shard(folder: Path, model: Model, path: str) -> Shard | str:
-    """One file of a model's vectors and its ids, or why it cannot be read"""
     ids_path = f"{path.removesuffix('.npy')}.ids.npy"
     if not (folder / path).is_file():
         return f"The model {model.key} lists {path}, which is not in the package."
@@ -522,7 +506,6 @@ def read_shard(folder: Path, model: Model, path: str) -> Shard | str:
 
 
 def read_shape(folder: Path, path: str) -> int | str:
-    """How many objects the shape index of a package holds, or why it cannot be served"""
     shape = folder / path
     if not shape.is_dir():
         return f"dce.shape names {path}, which is not a folder in the package."
@@ -582,7 +565,6 @@ def read_collection_file(folder: Path, report: Report) -> dict | None:
 
 
 def read_columns(table: str, has_records: bool) -> set[str]:
-    """The columns of a table that build reads by their names"""
     if table == "records":
         return {"object_id", *RECORD_COLUMNS}
     return {
@@ -595,7 +577,6 @@ def read_columns(table: str, has_records: bool) -> set[str]:
 
 
 def column_problem(table: str, column: str, has_records: bool) -> str | None:
-    """Why a column's name would hide it from build, which reads exact names"""
     read = read_columns(table, has_records)
     if column in read:
         return None
@@ -705,7 +686,6 @@ def counts_of(value: Any) -> dict | None:
 
 
 def catalog_problems(tables: dict[str, list[dict] | None]) -> list[str]:
-    """What the facets, text and related sources give that the site cannot use"""
     problems = []
     facets = {str(row["facet"]) for row in tables["facets"] or []}
     unfiltered = sorted(facets - set(FACETS))
@@ -744,7 +724,6 @@ def catalog_problems(tables: dict[str, list[dict] | None]) -> list[str]:
 
 
 def vector_problems(package: Package) -> tuple[list[str], list[str]]:
-    """Files without a vector from every model, and the ids of vectors without a file"""
     problems, without_files = [], []
     ids = [str(row["id"]) for row in package.tables["files"]]
     known = set(ids)
@@ -770,7 +749,6 @@ def vector_problems(package: Package) -> tuple[list[str], list[str]]:
 
 
 def unmatched(tables: dict[str, list[dict] | None]) -> tuple[list[str], list[str]]:
-    """The records that no file shows, and the files whose object has no record"""
     files, records = tables["files"], tables["records"]
     if records is None:
         return [], []
@@ -792,7 +770,6 @@ def group_of(row: dict) -> str:
 
 
 def examine(folder: Path) -> tuple[Report, Package | None]:
-    """Check a package, and read it if it can be built"""
     folder = Path(folder)
     report = Report()
     descriptor, problem = read_descriptor(folder)
@@ -909,7 +886,6 @@ def examine(folder: Path) -> tuple[Report, Package | None]:
 
 
 def check(folder: Path) -> Report:
-    """What a package holds, and whatever keeps it from being built"""
     return examine(folder)[0]
 
 
@@ -922,7 +898,6 @@ def grouped(rows: list[dict] | None, key: str = "object_id") -> dict[str, list[d
 
 
 def in_order(rows: list[dict]) -> list[dict]:
-    """Rows in the order of their position, then of the table"""
     return [
         row
         for _, row in sorted(
@@ -956,7 +931,6 @@ def explicit_text(rows: list[dict]) -> dict[str, list[str]]:
 
 
 def assemble(package: Package) -> dict[str, Any]:
-    """Everything write_collection takes, from a package that check accepts"""
     tables = package.tables
     has_records = tables["records"] is not None
     items, files_of = [], defaultdict(list)
@@ -1072,7 +1046,6 @@ def assemble(package: Package) -> dict[str, Any]:
 
 
 def missing_files(data_dir: Path, read: dict[str, Any]) -> list[str]:
-    """The files the collection names on this machine that are not under its folder"""
     named = [
         getattr(item, column)
         for item in read["items"]
@@ -1095,7 +1068,6 @@ def build(
     check_files: bool = False,
     overwrite: bool = False,
 ) -> tuple[dict[str, Any], Report]:
-    """Check a package, then write the collection it describes into a collection folder"""
     folder, data_dir = Path(folder), Path(data_dir)
     embeddings_dir = data_dir / "embeddings"
     root = folder.resolve()

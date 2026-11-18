@@ -174,7 +174,6 @@ DEFAULT_GROUP = "collection"
 
 
 def group_id_of(name: Any) -> str:
-    """A group's id: its name in lowercase, with hyphens for anything but letters and digits"""
     return re.sub(r"[\W_]+", "-", str(name).strip().lower()).strip("-")
 
 
@@ -187,7 +186,6 @@ def is_blank(value: Any) -> bool:
 
 
 def merged(rows: list[dict]) -> dict:
-    """An object's catalog: each column's first value among its files"""
     catalog: dict = {}
     for row in rows:
         for column, value in row.items():

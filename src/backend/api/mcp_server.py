@@ -267,7 +267,6 @@ class CollectionSummary(BaseModel):
 
 
 def own_origin(request: Request) -> str:
-    """The scheme and host a request reached the site at, as the declared proxies tell"""
     scheme = (limits.forwarded_value(request, "x-forwarded-proto") or "").lower()
     if scheme not in SCHEMES:
         scheme = request.url.scheme
@@ -633,7 +632,6 @@ async def get_object(
 
 
 def origin_parts(address: str) -> Optional[Tuple[str, str, int]]:
-    """The scheme, host and port of an http or https address, as an Origin names them"""
     try:
         parts = urlsplit(address)
         port = parts.port
@@ -645,7 +643,6 @@ def origin_parts(address: str) -> Optional[Tuple[str, str, int]]:
 
 
 def known_name(host: str) -> bool:
-    """Names DNS rebinding cannot send: an IP address, localhost, DCE_PUBLIC_URL's host"""
     try:
         name = urlsplit(f"//{host}").hostname or ""
     except ValueError:
@@ -660,7 +657,6 @@ def known_name(host: str) -> bool:
 
 
 def allowed_origin(origin: str, request: Request) -> bool:
-    """Pages on this computer and the site's own pages may call the endpoint"""
     asked = origin_parts(origin)
     if asked is None:
         return False
@@ -673,7 +669,6 @@ def allowed_origin(origin: str, request: Request) -> bool:
 
 
 def refusal(request: Request) -> Optional[Response]:
-    """The answer to a request that DNS rebinding could have sent, if it could have"""
     host = request.headers.get("host")
     if host and not site_settings()["proxy_hops"] and not known_name(host):
         return PlainTextResponse(UNKNOWN_NAME, status_code=421)
@@ -684,7 +679,6 @@ def refusal(request: Request) -> Optional[Response]:
 
 
 class OwnAddressOnly:
-    """Answer only requests made to the site itself, as the MCP specification asks"""
 
     def __init__(self, app: ASGIApp):
         self.app = app
@@ -698,7 +692,6 @@ class OwnAddressOnly:
 
 
 def http_routes() -> List[BaseRoute]:
-    """The /mcp endpoint, stateless and answering in plain JSON, at the site's address"""
     app = server.streamable_http_app(
         stateless_http=True,
         json_response=True,

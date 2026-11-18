@@ -1,5 +1,3 @@
-"""python -m src.collection check PACKAGE, and build PACKAGE --data-dir DIR"""
-
 import argparse
 import json
 import sys
@@ -56,7 +54,6 @@ def be(count: int) -> str:
 
 
 def unmatched(report: Report) -> list[str]:
-    """The records, files and vectors that do not meet, as sentences"""
     counts, examples = report.counts, report.examples
     lines = []
     count = counts["records_without_files"]
@@ -82,7 +79,6 @@ def unmatched(report: Report) -> list[str]:
 
 
 def described(report: Report, package: Path) -> list[str]:
-    """What check says of a package, in sentences"""
     notes = [f"Note: {note}" for note in report.notes]
     if report.problems:
         return [

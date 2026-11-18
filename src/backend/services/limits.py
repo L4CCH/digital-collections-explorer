@@ -19,7 +19,6 @@ MAX_UPLOAD_PIXELS = 50_000_000
 
 
 def forwarded(request: Request, header: str) -> List[str]:
-    """The entries proxies have added to a forwarding header, the nearest proxy's last"""
     return [
         part.strip()
         for part in request.headers.get(header, "").split(",")
@@ -28,7 +27,6 @@ def forwarded(request: Request, header: str) -> List[str]:
 
 
 def visitor_address(request: Request) -> str:
-    """The visitor's address, read past the proxies the administrator has declared"""
     hops = site_settings()["proxy_hops"]
     addresses = forwarded(request, "x-forwarded-for")
     if hops and len(addresses) >= hops:
@@ -37,7 +35,6 @@ def visitor_address(request: Request) -> str:
 
 
 def forwarded_value(request: Request, header: str) -> Optional[str]:
-    """The entry the outermost declared proxy added to a forwarding header, or the earliest"""
     hops = site_settings()["proxy_hops"]
     entries = forwarded(request, header)
     if not hops or not entries:
@@ -77,7 +74,6 @@ async def limit_searches(request: Request) -> None:
 
 
 async def limit_assistant_searches(request: Request) -> None:
-    """Count searches through MCP apart from visitors', so neither uses up the other's"""
     refuse_fast_searches(
         assistant_allowance, request, site_settings()["mcp_searches_per_minute"]
     )
