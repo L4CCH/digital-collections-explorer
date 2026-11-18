@@ -97,8 +97,8 @@ exactly those, unless `frontend_built` is true and `frontend_media` matches:
 npm install && npm run setup -- --with=MEDIA
 ```
 
-`MEDIA` is the list joined by commas, or `none`. Then install what the list
-needs, unless `python_packages` says it is there:
+`MEDIA` is the list joined by commas, or `none`; `config.json` keeps it. Then
+install what the list needs, unless `python_packages` says it is there:
 `$PY -m pip install -r requirements-pdf.txt` for `pdf`, and
 `$PY -m pip install -r requirements-3d.txt` for `3d`.
 
@@ -156,7 +156,7 @@ names an IIIF service, web addresses of images, or thumbnails. It sets
 Images the source cannot show, such as TIFF files, are copied whatever the
 answer. Linking depends on the source staying up, fast and at the same
 addresses, and on it letting other sites show its images. Say so when you
-recommend it.
+recommend it. When a source's terms forbid keeping copies, the answer is `link`.
 
 ## Step 5. Build the index
 
@@ -170,9 +170,12 @@ $PY -m src.ingest SOURCE --data-dir data/collections/NAME --images MODE \
   --estimated-seconds SECONDS --json data/collections/NAME/ingest_summary.json
 ```
 
-`SECONDS` is `sizing.embed_seconds.estimated` from the profile, or `compute` when
-the download speed could not be measured, so the report can compare it with
-what happened. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2. For
+`SECONDS` is `sizing.embed_seconds.estimated` from the profile, so the report
+can compare it with what happened. When there is none, the profile could not
+time downloading: first index a few hundred with `--limit` into the same folder,
+without `--estimated-seconds`, and work out `SECONDS` for the whole collection
+from `run.images_per_second` in that run's summary. The full run goes on from
+there. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2. For
 items elsewhere from a source, add `--related data/sources/NAME/related.parquet`.
 `--limit N` indexes the first N files in name order for a sample, which may all
 come from one folder: say so.
@@ -181,6 +184,8 @@ come from one folder: say so.
   `$PY -m src.ingest --status --data-dir data/collections/NAME`.
 - It can be stopped at any time. The same command continues where it left off.
   `--retry-failed` tries failed images again.
+- `--download-workers` sets how many files are fetched at once, 16 by default.
+  Lower it when the source asks for a slow pace.
 - Originals are never stored. An image with an IIIF service is requested from
   it at the size needed, not downloaded whole.
 - A few failures are normal. Report the count and the reasons from `problems`,
