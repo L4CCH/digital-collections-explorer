@@ -1,11 +1,11 @@
 ---
 name: dce-setup
-description: Turn a folder, S3 bucket, or parquet manifest of images, PDFs or 3D models into a searchable collection site with Digital Collections Explorer. Use when someone wants to explore, search, index, or publish a digital collection, including one with no metadata, no catalog, or messy file names, or one whose images are served by an IIIF image server. Inspects the collection, says what is and is not possible, asks only what a person must decide, builds the index, and starts the site.
+description: Turn a folder, S3 bucket, or parquet manifest of images, PDFs, or 3D models into a searchable collection site with Digital Collections Explorer, first writing a short program that reads the collection when it is behind a museum's API or another system. Use when someone wants to explore, search, index, or publish a digital collection, including one with no metadata, no catalog, or messy file names, one whose images are served by an IIIF image server, or one that can be read only through an API. Inspects the collection, says what is and is not possible, asks only what a person must decide, builds the index, and starts the site.
 license: MIT
 compatibility: Run from the root of the digital-collections-explorer repository. Needs Python 3.10+, Node.js 20.19+ and a shell, and network access for S3, web or IIIF sources.
 metadata:
   author: digital-collections-explorer
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Set up a searchable collection
@@ -63,6 +63,12 @@ Keep the JSON to yourself. You need `device`, `memory_bytes`, `free_disk_bytes`,
 `python_packages`.
 
 ## Step 2. Look at the collection
+
+If the collection is not a folder, a bucket, or a manifest, such as one behind a
+museum's API or in a collection management system that exports nothing usable,
+first write a short program that reads it, as
+[references/writing-a-source.md](references/writing-a-source.md) says, and
+profile the manifest it writes.
 
 ```bash
 $PY -m src.profiling /path/to/folder --json /tmp/profile.json
@@ -166,7 +172,8 @@ $PY -m src.ingest SOURCE --data-dir data/collections/NAME --images MODE \
 
 `SECONDS` is `sizing.embed_seconds.estimated` from the profile, or `compute` when
 the download speed could not be measured, so the report can compare it with
-what happened. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2.
+what happened. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2. For
+items elsewhere from a source, add `--related data/sources/NAME/related.parquet`.
 `--limit N` indexes the first N files in name order for a sample, which may all
 come from one folder: say so.
 
@@ -231,6 +238,8 @@ a date from it.
 
 ## More
 
+- Reading a collection from an API or another system:
+  [references/writing-a-source.md](references/writing-a-source.md).
 - Something went wrong: [references/troubleshooting.md](references/troubleshooting.md).
 - Putting the site on a server or AWS, opening it to the public, or letting AI
   assistants search it, only when the person asks:
