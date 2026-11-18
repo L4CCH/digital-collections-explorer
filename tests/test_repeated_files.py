@@ -31,12 +31,7 @@ def test_a_file_several_rows_name_is_indexed_once_for_the_first_row(
     tmp_path, monkeypatch, capsys
 ):
     collection(tmp_path)
-    related = tmp_path / "related.parquet"
-    duckdb.execute(
-        f"COPY (SELECT 'obj-a' AS object_id, 'flickr' AS source, 'flickr:1' AS "
-        f"source_id) TO '{related}' (FORMAT PARQUET)"
-    )
-    code, data_dir = ingest(tmp_path, monkeypatch, related)
+    code, data_dir = ingest(tmp_path, monkeypatch)
     assert code == 0
     out = capsys.readouterr().out
     assert (

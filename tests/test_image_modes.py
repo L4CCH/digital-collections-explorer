@@ -15,6 +15,7 @@ from src.profiling.profiler import image_decision, profile_collection
 from src.profiling.report import render
 from src.profiling.sources import ParquetManifestSource
 from tests.test_ingest import FakeService
+from tests.test_related import collection, ingest
 
 ORIGINAL = (6000, 4000)
 
@@ -195,6 +196,19 @@ def test_the_profile_does_not_call_images_of_unknown_size_broken(server, tmp_pat
     assert "3 images; the manifest does not give their sizes" in report
     assert "in total" not in report
     assert "Index a few hundred with --limit" in report
+
+
+def test_going_on_with_another_images_mode_is_refused(tmp_path, monkeypatch, capsys):
+    collection(tmp_path)
+    assert ingest(tmp_path, monkeypatch, None, "--images", "thumbnails")[0] == 0
+    assert ingest(tmp_path, monkeypatch, None, "--images", "link")[0] == 2
+    out = capsys.readouterr().out
+    assert "This collection was begun with --images thumbnails" in out
+    assert (
+        "Either run with --images thumbnails, or index into a new folder with "
+        "--data-dir." in out
+    )
+    assert ingest(tmp_path, monkeypatch, None, "--images", "thumbnails")[0] == 0
 
 
 def test_the_profile_asks_what_to_keep_only_when_the_source_can_show_images():

@@ -52,7 +52,7 @@ def related_table(path, rows, columns=COLUMNS):
     return path
 
 
-def ingest(tmp_path, monkeypatch, related):
+def ingest(tmp_path, monkeypatch, related=None, *options):
     from src.ingest import __main__ as command
 
     class Service(FakeService):
@@ -67,7 +67,9 @@ def ingest(tmp_path, monkeypatch, related):
     data_dir = tmp_path / "site"
     manifest = str(tmp_path / "manifest.parquet")
     arguments = ["ingest", manifest, "--data-dir", str(data_dir), "--device", "cpu"]
-    monkeypatch.setattr(sys, "argv", arguments + ["--related", str(related)])
+    if related:
+        arguments += ["--related", str(related)]
+    monkeypatch.setattr(sys, "argv", arguments + list(options))
     return command.main(), data_dir
 
 

@@ -267,6 +267,16 @@ def main() -> int:
         state.close()
         return 2
     state.remember("model_name", settings.model_name)
+    begun_with = state.fact("images") or "copy"
+    if begun_with != args.images and state.counts().get("done"):
+        print(
+            f"This collection was begun with --images {begun_with}, and the images "
+            f"indexed so far keep what that mode keeps.\nGoing on with --images "
+            f"{args.images} would mix the two. Either run with --images {begun_with}, "
+            f"or index into a new folder with --data-dir."
+        )
+        state.close()
+        return 2
 
     print(f"Listing images and PDFs in {args.uri} ...")
     source = open_source(args.uri, anonymous=args.anonymous, fetch_via=args.fetch_via)
