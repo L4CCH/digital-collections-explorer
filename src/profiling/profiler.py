@@ -607,18 +607,6 @@ def file_derived_fields(
                 f"The site does not use it.",
             )
         )
-    else:
-        fields.append(
-            FieldProfile.unavailable(
-                "capture_date",
-                type="date",
-                note=f"Only {len(dates)} of {deep['sampled']} sampled images carry an EXIF date.",
-                remedy={
-                    "action": "infer dates from file or folder names",
-                    "confidence": "low",
-                },
-            )
-        )
 
     if deep["exif_gps"] / sampled > MIN_EXIF_COVERAGE:
         fields.append(
@@ -630,14 +618,6 @@ def file_derived_fields(
                 note="Where each picture was taken, read from EXIF GPS. For scanned "
                 "or photographed objects this is the studio, not the object's origin. "
                 "The site does not use it.",
-            )
-        )
-    else:
-        fields.append(
-            FieldProfile.unavailable(
-                "location",
-                type="geo",
-                note="No location field, and the images carry no GPS data.",
             )
         )
 
@@ -689,7 +669,6 @@ def infer_fields(
 def build_capabilities(
     fields: list[FieldProfile], structure: Structure
 ) -> Capabilities:
-    capability_names = {"capture_date": "date_range", "location": "geo_map"}
     roles = {f.read_as for f in fields if f.provenance == Provenance.CATALOG}
     searched = roles & set(SEARCHED_AS) - {"identifiers"}
     capabilities = Capabilities(
@@ -714,16 +693,6 @@ def build_capabilities(
                 "creator, date or description.",
             )
         )
-    for f in fields:
-        if not f.available:
-            capabilities.unavailable.append(
-                Capability(
-                    capability=capability_names.get(f.name, f.name),
-                    reason=f.note,
-                    remedy=(f.remedy or {}).get("action"),
-                    cost=f.remedy,
-                )
-            )
     return capabilities
 
 

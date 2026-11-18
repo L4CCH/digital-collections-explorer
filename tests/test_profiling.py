@@ -57,7 +57,7 @@ def test_a_folder_with_pdfs_asks_for_the_pdf_option(profile):
 
 def test_exif_dates_are_reported_but_not_offered_as_a_filter(profile):
     date = profile.field("capture_date")
-    assert date.available and date.coverage > 0.5 and not date.facetable
+    assert date.coverage > 0.5 and not date.facetable
     assert date.provenance.value == "file_derived"
     assert "The site does not use it." in date.note
     assert profile.capabilities.facets == []
@@ -68,11 +68,14 @@ def test_year_folders_are_noticed_but_not_offered_as_a_filter(profile):
     assert folder is not None and not folder.facetable
 
 
-def test_missing_capabilities_always_explain_why(profile):
-    assert not profile.field("location").available
-    missing = {c.capability for c in profile.capabilities.unavailable}
-    assert "geo_map" in missing
-    assert all(c.reason for c in profile.capabilities.unavailable)
+def test_only_what_the_site_could_do_is_listed_as_not_possible(profile):
+    assert profile.field("location") is None
+    assert [c.capability for c in profile.capabilities.unavailable] == [
+        "catalog_search"
+    ]
+    section = render(profile).split("What is not possible:")[1].split("\n\n")[0]
+    assert section.count("      x ") == 1
+    assert "x search the catalog text as well" in section
 
 
 def test_without_a_catalog_search_works_by_appearance_alone(profile):
@@ -102,7 +105,7 @@ def test_gps_block_without_coordinates_is_not_a_location(tmp_path):
         exif[exif_gps_pointer] = {}
         image.save(tmp_path / f"scan_{index}.jpg", exif=exif.tobytes())
     result = profile_collection(LocalDirSource(str(tmp_path)), "gps", progress=False)
-    assert not result.field("location").available
+    assert result.field("location") is None
 
 
 def test_empty_catalog_files_are_pointed_out(tmp_path):

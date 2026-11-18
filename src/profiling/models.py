@@ -17,7 +17,6 @@ class FieldProfile(BaseModel):
     name: str
     type: Literal["string", "date", "number", "enum", "geo", "bool"] = "string"
     provenance: Provenance | None = None
-    available: bool = True
     coverage: float = 0.0
     cardinality: int | None = None
     sample_values: list[Any] = Field(default_factory=list)
@@ -27,18 +26,12 @@ class FieldProfile(BaseModel):
     read_as: str | None = None
     filtered_as: str | None = None
     note: str = ""
-    remedy: dict[str, Any] | None = None
-
-    @classmethod
-    def unavailable(cls, name: str, note: str, remedy: dict | None = None, **kw):
-        return cls(name=name, available=False, note=note, remedy=remedy, **kw)
 
 
 class Capability(BaseModel):
     capability: str
     reason: str = ""
     remedy: str | None = None
-    cost: dict[str, Any] | None = None
 
 
 class Capabilities(BaseModel):

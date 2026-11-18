@@ -229,27 +229,19 @@ def field_lines(p: CollectionProfile) -> list[str]:
         filters = ", ".join(f.replace("_", " ") for f in capabilities.facets)
         lines.append(f"      - filter by {filters}")
     lines += ["", "  What the site does with each column:"]
-    for f in (f for f in p.fields if f.available):
+    for f in p.fields:
         lines.append(
             f"      [{SOURCE_LABEL.get(f.provenance, '?')}] {f.name:<20} "
             f"{f.coverage:>4.0%} filled   {use_of(f)}"
         )
         if f.note:
             lines.append(f"               {f.note}")
-    missing = [f for f in p.fields if not f.available]
-    unable = [c for c in capabilities.unavailable if c.capability == "catalog_search"]
-    if missing or unable:
+    if capabilities.unavailable:
         lines += ["", "  What is not possible:"]
-        for c in unable:
+        for c in capabilities.unavailable:
             lines.append(f"      x {CAPABILITY_WORDS[c.capability]}")
             lines.append(f"         Why: {c.reason}")
             lines.append(f"         Possible fix: {c.remedy}")
-        for f in missing:
-            lines.append(f"      x {f.name}")
-            lines.append(f"         Why: {f.note}")
-            if f.remedy:
-                details = ", ".join(f"{k}: {v}" for k, v in f.remedy.items())
-                lines.append(f"         Possible fix: {details}")
     return lines
 
 
