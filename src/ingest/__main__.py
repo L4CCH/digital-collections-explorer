@@ -16,7 +16,13 @@ from src.backend.services.index_info import (
     read_index_info,
 )
 from src.collection.catalog import group_id_warning
-from src.profiling.sources import left_without_image, once_each, open_source
+from src.profiling.sources import (
+    PACE,
+    left_without_image,
+    once_each,
+    open_source,
+    per_second,
+)
 
 from .documents import INSTALL_HINT, can_read_pdfs
 from .export import write_from_state
@@ -104,6 +110,12 @@ def parse_args() -> argparse.Namespace:
         "--device", default="auto", choices=["auto", "cuda", "mps", "cpu"]
     )
     parser.add_argument("--download-workers", type=int, default=16)
+    parser.add_argument(
+        "--requests-per-second",
+        type=per_second,
+        help="send at most this many requests a second to web servers, such as an "
+        "IIIF image server, when the source's terms ask for a slower pace",
+    )
     parser.add_argument("--decode-workers", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=settings.batch_size)
     parser.add_argument(
@@ -241,6 +253,7 @@ def foreign_index_exists(embeddings_dir: Path) -> bool:
 def main() -> int:
     args = parse_args()
     started = time.time()
+    PACE.set(args.requests_per_second)
     if args.data_dir:
         apply_data_dir(settings, args.data_dir)
     embeddings_dir = Path(settings.embeddings_dir)

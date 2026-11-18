@@ -2,6 +2,7 @@ import io
 import json
 import sqlite3
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import duckdb
@@ -15,7 +16,7 @@ from src.ingest.state import IngestState
 from src.profiling.models import FieldProfile
 from src.profiling.profiler import image_decision, profile_collection
 from src.profiling.report import render
-from src.profiling.sources import ParquetManifestSource
+from src.profiling.sources import PACE, Pace, ParquetManifestSource
 from tests.test_ingest import FakeService
 from tests.test_related import collection, ingest
 
@@ -217,6 +218,38 @@ def test_files_at_one_path_on_two_servers_or_queries_stay_apart(server, tmp_path
     }
     metadata, _ = indexed(source, tmp_path, "copy")
     assert len(metadata) == 4
+
+
+def test_a_pace_spaces_requests_from_every_thread():
+    pace = Pace()
+    pace.set(20)
+    started = time.monotonic()
+    threads = [threading.Thread(target=pace.wait) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert time.monotonic() - started >= 5 / 20
+
+
+def test_requests_per_second_paces_what_ingest_asks_of_a_server(
+    server, tmp_path, monkeypatch
+):
+    address, asked = server
+    monkeypatch.setattr(PACE, "interval", 0.0)
+    rows = [[f"{address}/iiif/map-{n}"] for n in range(3)]
+    source = manifest(tmp_path, ["iiif"], rows)
+    PACE.set(10)
+    started = time.monotonic()
+    indexed(source, tmp_path, "link")
+    assert len(asked) == 6 and time.monotonic() - started >= 5 / 10
+
+
+def test_ingest_takes_requests_per_second(tmp_path, monkeypatch):
+    monkeypatch.setattr(PACE, "interval", 0.0)
+    collection(tmp_path)
+    assert ingest(tmp_path, monkeypatch, None, "--requests-per-second", "5")[0] == 0
+    assert PACE.interval == 0.2
 
 
 def test_files_fetched_through_s3_are_read_by_their_path(tmp_path):

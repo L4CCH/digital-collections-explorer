@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -130,6 +132,39 @@ def is_parquet(uri: str) -> bool:
     return path.lower().endswith(".parquet")
 
 
+class Pace:
+    def __init__(self) -> None:
+        self.interval = 0.0
+        self.next_at = 0.0
+        self.lock = threading.Lock()
+
+    def set(self, per_second: float | None) -> None:
+        self.interval = 1 / per_second if per_second else 0.0
+        self.next_at = 0.0
+
+    def wait(self) -> None:
+        if not self.interval:
+            return
+        with self.lock:
+            now = time.monotonic()
+            at = max(now, self.next_at)
+            self.next_at = at + self.interval
+        time.sleep(at - now)
+
+
+PACE = Pace()
+
+
+def per_second(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0.0
+    if not value > 0:
+        raise argparse.ArgumentTypeError(f"{text} is not a number above 0")
+    return value
+
+
 def fetch_web(url: str, limit: int | None = None) -> tuple[bytes, str] | None:
     """The body and content type found at a web address, or None if it cannot be read"""
     import urllib.request
@@ -138,6 +173,7 @@ def fetch_web(url: str, limit: int | None = None) -> tuple[bytes, str] | None:
     if limit:
         headers["Range"] = f"bytes=0-{limit - 1}"
     try:
+        PACE.wait()
         request = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
             return response.read(), (response.headers.get("Content-Type") or "").lower()
