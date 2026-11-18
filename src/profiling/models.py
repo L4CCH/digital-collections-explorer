@@ -129,6 +129,22 @@ class Decision(BaseModel):
     why: str = ""
 
 
+class GivenVectors(BaseModel):
+    rows: int = 0
+    given: int = 0
+    lengths: dict[int, int] = Field(default_factory=dict)
+    unusable: int = 0
+
+
+class RelatedItems(BaseModel):
+    path: str
+    rows: int = 0
+    sources: dict[str, int] = Field(default_factory=dict)
+    objects: int = 0
+    refused: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class CollectionProfile(BaseModel):
     profile_version: int = 1
     collection_id: str
@@ -145,6 +161,8 @@ class CollectionProfile(BaseModel):
     sizing: Sizing = Field(default_factory=Sizing)
     decisions: list[Decision] = Field(default_factory=list)
     media: list[str] = Field(default_factory=list)
+    vectors: GivenVectors | None = None
+    related: RelatedItems | None = None
 
     def field(self, name: str) -> FieldProfile | None:
         return next((f for f in self.fields if f.name == name), None)

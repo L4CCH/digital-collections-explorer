@@ -305,6 +305,58 @@ def decision_lines(p: CollectionProfile) -> list[str]:
     return lines
 
 
+def plural(count: int, one: str, many: str) -> str:
+    return f"{count:,} {one if count == 1 else many}"
+
+
+def given_lines(p: CollectionProfile) -> list[str]:
+    from src.ingest.pipeline import SPOT_CHECK_IMAGES
+
+    lines = []
+    vectors = p.vectors
+    if vectors and vectors.given:
+        sizes = " or ".join(f"{n:,}" for n in sorted(vectors.lengths))
+        lines += [
+            "",
+            "  Vectors given in the manifest:",
+            f"      {vectors.given:,} of {vectors.rows:,} rows give a vector of {sizes} "
+            "numbers. Indexing uses them instead of computing vectors, after "
+            f"re-embedding {min(SPOT_CHECK_IMAGES, vectors.given)} of them to check that they come from the "
+            "model in config.json.",
+        ]
+        if len(vectors.lengths) > 1:
+            lines.append(
+                "      Must fix before indexing: every vector needs as many numbers "
+                f"as the model makes, but these have {sizes}."
+            )
+        if vectors.unusable:
+            lines.append(
+                f"      {plural(vectors.unusable, 'vector is', 'vectors are')} zero or "
+                "not numbers; those images will fail."
+            )
+        if vectors.given < vectors.rows:
+            left = vectors.rows - vectors.given
+            lines.append(
+                f"      {plural(left, 'row gives', 'rows give')} no vector; indexing "
+                "computes those."
+            )
+    related = p.related
+    if related:
+        lines += ["", f"  Related items ({related.path}):"]
+        if related.rows and not related.refused:
+            by_source = ", ".join(
+                f"{count:,} from {source}"
+                for source, count in sorted(related.sources.items())
+            )
+            lines.append(
+                f"      {plural(related.rows, 'item', 'items')} for "
+                f"{plural(related.objects, 'object', 'objects')}: {by_source}."
+            )
+        lines += [f"      Must fix before indexing: {line}" for line in related.refused]
+        lines += [f"      {line}" for line in related.notes]
+    return lines
+
+
 def render(p: CollectionProfile) -> str:
     lines = [
         "=" * WIDTH,
@@ -315,6 +367,7 @@ def render(p: CollectionProfile) -> str:
     for section in (
         overview_lines,
         problem_lines,
+        given_lines,
         structure_lines,
         group_lines,
         naming_lines,

@@ -151,3 +151,24 @@ def test_notes_say_what_is_left_out_and_why():
         'The related table gives counts that are not a JSON object, such as {"faves": '
         "3}, in 1 row; those counts are left out.",
     ]
+
+
+def test_the_profile_checks_a_related_table_as_ingest_would(tmp_path):
+    from src.profiling.profiler import profile_collection, related_items
+    from src.profiling.report import render
+    from src.profiling.sources import ParquetManifestSource
+
+    collection(tmp_path)
+    related = related_table(tmp_path / "related.parquet", list(ROWS.values()))
+    source = ParquetManifestSource(str(tmp_path / "manifest.parquet"))
+    profile = profile_collection(source, "test", sample=3, progress=False)
+    profile.related = related_items(source, str(related))
+    report = render(profile)
+    assert "3 items for 2 objects: 3 from flickr." in report
+    assert "names objects the manifest does not have in 1 row, such as obj-z" in report
+    twice = related_table(tmp_path / "twice.parquet", [ROWS["harbor"]] * 2)
+    profile.related = related_items(source, str(twice))
+    assert (
+        "Must fix before indexing: The related table repeats the source_id flickr:1"
+        in render(profile)
+    )

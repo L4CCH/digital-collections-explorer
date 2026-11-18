@@ -6,6 +6,7 @@ import re
 import statistics
 from collections import Counter, defaultdict
 
+import numpy as np
 from PIL import Image, ImageFile
 
 from src.backend.core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS, THUMBNAIL_KEYS
@@ -26,9 +27,11 @@ from .models import (
     Decision,
     DirectorySignal,
     FieldProfile,
+    GivenVectors,
     Issue,
     NamePattern,
     Provenance,
+    RelatedItems,
     ScanStats,
     Sizing,
     Structure,
@@ -819,6 +822,36 @@ def media_needed(stats: ScanStats, fields: list[FieldProfile]) -> list[str]:
     return [medium for medium, is_needed in needed.items() if is_needed]
 
 
+def given_vectors(source: Source) -> GivenVectors | None:
+    if not getattr(source, "vector_column", None):
+        return None
+    vectors = source.vectors()
+    given = [vector for vector in vectors if vector is not None]
+    return GivenVectors(
+        rows=len(vectors),
+        given=len(given),
+        lengths=dict(Counter(len(vector) for vector in given)),
+        unusable=sum(1 for v in given if not np.isfinite(v).all() or not np.any(v)),
+    )
+
+
+def related_items(source: Source, path: str) -> RelatedItems:
+    from src.ingest.related import manifest_keys, read_related, related_problems, text
+
+    columns, rows = read_related(path)
+    object_ids, addresses = manifest_keys(list(source.iter_files()))
+    refused, notes = related_problems(columns, rows, object_ids, addresses)
+    named = {text(row.get("object_id")) for row in rows} & object_ids
+    return RelatedItems(
+        path=path,
+        rows=len(rows),
+        sources=dict(Counter(text(row.get("source")) or "?" for row in rows)),
+        objects=len(named),
+        refused=refused,
+        notes=notes,
+    )
+
+
 def profile_collection(
     source: Source,
     collection_id: str,
@@ -847,4 +880,5 @@ def profile_collection(
             any(source.web_image_address(ref) for ref in images[:WEB_IMAGE_SAMPLE]),
         ),
         media=media_needed(stats, fields),
+        vectors=given_vectors(source),
     )

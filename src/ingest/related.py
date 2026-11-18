@@ -9,7 +9,7 @@ from typing import Any
 
 from PIL import Image
 
-from src.backend.services.catalog_fields import is_web_address
+from src.backend.services.catalog_fields import is_web_address, object_id_from
 from src.collection.catalog import is_blank
 from src.collection.writer import Related
 from src.profiling.sources import fetch_web
@@ -25,6 +25,16 @@ from .pipeline import (
 REQUIRED = ("object_id", "source", "source_id")
 DEFAULT_LINK_TYPE = "same_record"
 EXAMPLES = 3
+
+
+def manifest_keys(refs) -> tuple[set[str], set[str]]:
+    object_ids = {
+        str(found).strip()
+        for found in (object_id_from(ref.extra.get("row") or {}) for ref in refs)
+        if found
+    }
+    addresses = {ref.extra["url"] for ref in refs if ref.extra.get("url")}
+    return object_ids, addresses
 
 
 def read_related(path: str) -> tuple[list[str], list[dict[str, Any]]]:

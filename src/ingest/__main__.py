@@ -9,7 +9,6 @@ from pathlib import Path
 import torch
 
 from src.backend.core.config import DeviceType, apply_data_dir, settings
-from src.backend.services.catalog_fields import object_id_from
 from src.backend.services.embedding_service_factory import create_embedding_service
 from src.backend.services.index_info import (
     KNOWN_DIMENSIONS,
@@ -30,7 +29,14 @@ from .pipeline import (
     make_item_id,
     run,
 )
-from .related import counted, kept_related, read_related, related_problems, they
+from .related import (
+    counted,
+    kept_related,
+    manifest_keys,
+    read_related,
+    related_problems,
+    they,
+)
 from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
 
@@ -277,12 +283,7 @@ def main() -> int:
     related_rows: list[dict] = []
     if args.related:
         columns, related_rows = read_related(args.related)
-        object_ids = {
-            str(found).strip()
-            for found in (object_id_from(ref.extra.get("row") or {}) for ref in refs)
-            if found
-        }
-        addresses = {ref.extra["url"] for ref in refs if ref.extra.get("url")}
+        object_ids, addresses = manifest_keys(refs)
         refused, notes = related_problems(columns, related_rows, object_ids, addresses)
         for line in refused + notes:
             print(line)

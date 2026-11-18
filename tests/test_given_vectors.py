@@ -145,3 +145,31 @@ def test_ingest_stops_before_indexing_when_the_vectors_do_not_match(
     assert command.main() == 2
     assert "do not match color-model" in capsys.readouterr().out
     assert not (data_dir / "embeddings" / "index_info.json").exists()
+
+
+def test_the_profile_counts_given_vectors_and_says_what_to_fix(tmp_path):
+    from src.profiling.profiler import profile_collection
+    from src.profiling.report import render
+
+    write_images(tmp_path / "images", 4)
+    rows = colored(4)
+    rows[1] = (rows[1][0], None)
+    rows[2] = (rows[2][0], [0.0, 0.0, 0.0, 0.0])
+    rows[3] = (rows[3][0], color_vector(COLORS[3])[:3])
+    source = write_manifest(tmp_path / "manifest.parquet", rows)
+    profile = profile_collection(source, "test", sample=4, progress=False)
+    assert profile.vectors.model_dump() == {
+        "rows": 4,
+        "given": 3,
+        "lengths": {4: 2, 3: 1},
+        "unusable": 1,
+    }
+    report = render(profile)
+    assert "3 of 4 rows give a vector of 3 or 4 numbers." in report
+    assert "after re-embedding 3 of them to check" in report
+    assert (
+        "Must fix before indexing: every vector needs as many numbers as the model "
+        "makes, but these have 3 or 4." in report
+    )
+    assert "1 vector is zero or not numbers; those images will fail." in report
+    assert "1 row gives no vector; indexing computes those." in report

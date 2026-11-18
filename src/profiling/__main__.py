@@ -6,7 +6,7 @@ import sys
 
 from src.backend.core.config import settings
 
-from .profiler import profile_collection
+from .profiler import profile_collection, related_items
 from .report import render
 from .sources import open_source
 
@@ -40,6 +40,10 @@ def main() -> int:
         help="s3://bucket holding the files, when manifest URLs are not downloadable",
     )
     parser.add_argument(
+        "--related",
+        help="also check a parquet table of related items, as ingest --related reads",
+    )
+    parser.add_argument(
         "--json", dest="json_path", help="also write the full profile as JSON"
     )
     args = parser.parse_args()
@@ -53,6 +57,8 @@ def main() -> int:
         max_files=args.max_files,
         model_type=settings.model_type.value,
     )
+    if args.related:
+        profile.related = related_items(source, args.related)
     print(render(profile))
 
     if args.json_path:
