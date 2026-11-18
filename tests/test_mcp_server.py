@@ -504,3 +504,18 @@ def test_an_object_names_its_groups_institution_and_license(tmp_path):
     assert rifle["license"] == west["license"]
     quilt = call("get_object", {"id": "a1"}).structured_content
     assert (quilt["institution"], quilt["license"]) == (None, "CC BY 4.0")
+
+
+def test_a_site_with_one_group_names_no_group_on_what_it_finds():
+    from src.backend.api import mcp_server
+
+    one = {"groups": [{"id": "collection", "label": "collection"}]}
+    several = {
+        "groups": [{"id": "a", "label": "A Museum"}, {"id": "b", "label": "B Library"}]
+    }
+    result = {"id": "a1", "metadata": {"group": "collection", "title": "A quilt"}}
+    address = "https://example.org"
+    assert mcp_server.found(result, mcp_server.group_labels(one), address).group is None
+    result["metadata"]["group"] = "b"
+    labels = mcp_server.group_labels(several)
+    assert mcp_server.found(result, labels, address).group == "B Library"

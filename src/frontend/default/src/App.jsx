@@ -43,10 +43,12 @@ function App() {
   const includeUncataloged = route.uncataloged !== false;
   const wallKey = `${groupsKey}|${includeUncataloged}`;
   const wallGroups = useRef(wallKey);
-  const groupLabels = useMemo(
-    () => Object.fromEntries((collection?.groups || []).map((group) => [group.id, group.label])),
-    [collection],
-  );
+  const groupLabels = useMemo(() => {
+    const groups = collection?.groups || [];
+    return groups.length > 1
+      ? Object.fromEntries(groups.map((group) => [group.id, group.label]))
+      : {};
+  }, [collection]);
   const institution = collection?.institution || collection?.source_name;
 
   useEffect(() => {

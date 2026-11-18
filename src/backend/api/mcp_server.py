@@ -126,7 +126,7 @@ class Found(BaseModel):
         description="The catalog title; empty when the image has no catalog record"
     )
     group: Optional[str] = Field(
-        description="The group it belongs to, such as a museum"
+        description="The group it belongs to, such as a museum; empty when the site has only one"
     )
     images: int = Field(description="How many images the object has")
     why: Optional[str] = Field(
@@ -294,7 +294,12 @@ async def allow(ctx: Context) -> None:
 
 
 def group_labels(collection: Dict[str, Any]) -> Dict[str, str]:
-    return {g["id"]: g["label"] for g in collection.get("groups") or []}
+    groups = collection.get("groups") or []
+    return {g["id"]: g["label"] for g in groups} if len(groups) > 1 else {}
+
+
+def group_name(labels: Dict[str, str], group: Optional[str]) -> Optional[str]:
+    return labels.get(group, group) if labels else None
 
 
 def found(
@@ -308,7 +313,7 @@ def found(
         id=image_id,
         object_id=result.get("object_id") or metadata.get("object_id"),
         title=metadata.get("title"),
-        group=labels.get(metadata.get("group"), metadata.get("group")),
+        group=group_name(labels, metadata.get("group")),
         images=result.get("image_count") or 1,
         why=result.get("explanation") or ("Looks similar" if by_image else None),
         similarity=None if similarity is None else round(float(similarity), 3),
@@ -614,7 +619,7 @@ async def get_object(
     return ObjectDetails(
         id=item["id"],
         title=metadata.get("title"),
-        group=labels.get(metadata.get("group"), metadata.get("group")),
+        group=group_name(labels, metadata.get("group")),
         page=f"{site}/#/item/{quote(item['id'], safe='')}",
         institution=group.get("institution") or collection.get("institution"),
         record=metadata.get("source_url"),
