@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 import sys
 from pathlib import Path
 
@@ -47,23 +48,24 @@ def folder(tmp_path):
     return root
 
 
-def ingest(folder, data_dir):
+def ingest(folder, out, **overrides):
     source = LocalDirSource(str(folder))
     refs = sorted(
         (r for r in source.iter_files() if r.is_image or r.is_document),
         key=lambda r: r.key,
     )
-    state = IngestState(str(data_dir / "embeddings" / "state.sqlite"), commit_every=2)
+    state = IngestState(str(out / "embeddings" / "state.sqlite"), commit_every=2)
     ids = [make_item_id(r.key) for r in refs]
     state.seed([(i, r.key, r.size) for i, r in zip(ids, refs)])
     finished = state.finished_ids(ids, retry_failed=False)
     pending = [r for i, r in zip(ids, refs) if i not in finished]
     options = Options(
-        thumbnails_dir=data_dir / "thumbnails",
-        processed_dir=data_dir / "processed",
+        thumbnails_dir=out / "thumbnails",
+        processed_dir=out / "processed",
         download_workers=2,
         decode_workers=2,
         batch_size=2,
+        **overrides,
     )
     stats, _ = run(source, pending, FakeService(), state, options)
     return state, stats
@@ -84,7 +86,9 @@ def test_each_page_of_a_pdf_is_indexed_as_an_image_of_one_document(folder, tmp_p
     for page in pages:
         assert page["pages"] == PAGES
         assert page["document_key"] == "reports/annual.pdf"
-        assert page["document"] == str(folder / "reports" / "annual.pdf")
+        kept = Path(page["document"])
+        assert kept.parent.parent == tmp_path / "documents"
+        assert kept.read_bytes() == (folder / "reports" / "annual.pdf").read_bytes()
         assert page["file_name"] == "annual.pdf"
         assert max(page["width"], page["height"]) == 1920
         assert Path(page["paths"]["thumbnail"]).exists()
@@ -203,6 +207,20 @@ def serve_document(images, monkeypatch, address):
         images.embedding_service, "get_document_by_id", lambda item_id: document
     )
     return asyncio.run(images.get_document("a"))
+
+
+def test_a_pdf_is_kept_in_the_collection_and_opens_without_its_source(
+    images_route, monkeypatch, folder, tmp_path
+):
+    data_dir = tmp_path / "site"
+    state, _ = ingest(folder, data_dir, data_dir=data_dir)
+    pages = [m for _, _, m in state.done_rows() if m["type"] == "pdf_page"]
+    stored = pages[0]["document"]
+    assert stored.startswith("documents/") and stored.endswith(".pdf")
+    shutil.rmtree(folder)
+    monkeypatch.setattr(images_route.settings, "data_dir", str(data_dir))
+    response = serve_document(images_route, monkeypatch, stored)
+    assert Path(response.path) == data_dir / stored
 
 
 def test_a_pdf_kept_on_the_site_opens_in_the_browser(images_route, monkeypatch, folder):

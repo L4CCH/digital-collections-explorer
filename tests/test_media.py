@@ -178,21 +178,26 @@ def test_the_site_shows_only_models_it_can_serve(address, servable):
 def test_a_model_a_manifest_names_by_path_is_found_beside_it(tmp_path):
     import duckdb
 
-    from src.ingest.pipeline import catalog_metadata
+    from src.ingest.pipeline import Options, catalog_metadata
     from src.profiling.sources import ParquetManifestSource
 
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "a.glb").write_bytes(b"glTF a")
     manifest = tmp_path / "manifest.parquet"
     duckdb.execute(
         "COPY (SELECT * FROM (VALUES ('photos/a.jpg', 'models/a.glb', 'a'), "
-        "('photos/b.jpg', 'models/b.gltf', 'b')) AS t(image_url, model_url, object_id)) "
-        f"TO '{manifest}' (FORMAT PARQUET)"
+        "('photos/b.jpg', 'models/b.gltf', 'b'), "
+        "('photos/c.jpg', 'models/missing.glb', 'c')) "
+        f"AS t(image_url, model_url, object_id)) TO '{manifest}' (FORMAT PARQUET)"
     )
     source = ParquetManifestSource(str(manifest))
-    first, second = (ref.extra["row"] for ref in source.iter_files())
-    assert catalog_metadata(first, source)["model_url"] == str(
-        tmp_path / "models" / "a.glb"
-    )
-    assert "model_url" not in catalog_metadata(second, source)
+    site = tmp_path / "site"
+    options = Options(site / "thumbnails", site / "processed", data_dir=site)
+    first, second, third = (ref.extra["row"] for ref in source.iter_files())
+    kept = catalog_metadata(first, source, options)["model_url"]
+    assert (site / kept).read_bytes() == b"glTF a"
+    assert "model_url" not in catalog_metadata(second, source, options)
+    assert "model_url" not in catalog_metadata(third, source, options)
 
 
 def collection_of(metadata, tmp_path, groups=None):

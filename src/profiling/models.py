@@ -112,6 +112,7 @@ class Sizing(BaseModel):
     n_items: int = 0
     vectors_bytes: int = 0
     thumbnails_bytes: int = 0
+    documents_bytes: int = 0
     index_bytes: int = 0
     db_bytes: int = 0
     serving_ram_bytes: int = 0

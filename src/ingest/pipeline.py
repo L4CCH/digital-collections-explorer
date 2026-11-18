@@ -6,9 +6,11 @@ import io
 import json
 import os
 import queue
+import shutil
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -184,9 +186,18 @@ def make_item_id(key: str) -> str:
     return base64.urlsafe_b64encode(key.encode("utf-8")).decode("utf-8").rstrip("=")
 
 
-def sharded_path(root: Path, key: str) -> Path:
+def sharded_path(root: Path, key: str, suffix: str = ".jpg") -> Path:
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
-    return root / digest[:SHARD_PREFIX_LENGTH] / f"{digest}.jpg"
+    return root / digest[:SHARD_PREFIX_LENGTH] / f"{digest}{suffix}"
+
+
+def kept_root(data_dir: Path | None, processed_dir: Path) -> Path:
+    return data_dir or processed_dir.parent
+
+
+def kept_path(options: Options, folder: str, key: str, suffix: str) -> Path:
+    root = kept_root(options.data_dir, options.processed_dir)
+    return sharded_path(root / folder, key, suffix)
 
 
 def stored_path(path: Path, data_dir: Path | None) -> str:
@@ -278,18 +289,33 @@ def download_worker(
             results.put(failure(item, "download", error))
 
 
-def model_address(catalog: dict, source: Source) -> str | None:
+def kept_model(address: str, options: Options) -> str | None:
+    if is_web_address(address):
+        return address
+    if not os.path.isfile(address):
+        return None
+    path = kept_path(options, "models", address, ".glb")
+    if not path.exists() or path.stat().st_size != os.path.getsize(address):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial = path.with_name(f"{path.name}.{uuid.uuid4().hex}")
+        shutil.copyfile(address, partial)
+        os.replace(partial, path)
+    return stored_path(path, options.data_dir)
+
+
+def model_address(catalog: dict, source: Source, options: Options) -> str | None:
     address = model_url_from(catalog)
     if address and "://" not in address:
         address = source.local_address(address)
-    return servable_model(address)
+    address = servable_model(address)
+    return kept_model(address, options) if address else None
 
 
-def catalog_metadata(catalog: dict | None, source: Source) -> dict:
+def catalog_metadata(catalog: dict | None, source: Source, options: Options) -> dict:
     if not catalog:
         return {}
     optional = {
-        "model_url": model_address(catalog, source),
+        "model_url": model_address(catalog, source, options),
         "view_orbit": view_orbit_from(catalog),
         "iiif": iiif_info_from(catalog),
         **{
@@ -373,13 +399,18 @@ def decode_image(source: Source, options: Options, item: Item) -> None:
         "height": height,
         "source_uri": source.original_uri(item.ref),
         "paths": {"original": original_of(source, item, paths), **paths},
-        **catalog_metadata(item.ref.extra.get("row"), source),
+        **catalog_metadata(item.ref.extra.get("row"), source, options),
     }
     item.image = model_input(image)
 
 
-def can_be_opened(address: str) -> bool:
-    return address.startswith(("http://", "https://")) or os.path.exists(address)
+def kept_document(original: str, item: Item, options: Options) -> str:
+    if is_web_address(original):
+        return original
+    path = kept_path(options, "documents", item.ref.key, ".pdf")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(item.blob)
+    return stored_path(path, options.data_dir)
 
 
 def split_document(
@@ -403,9 +434,9 @@ def split_document(
         "type": "pdf_page",
         "pages": pdf.pages,
         "source_uri": original,
-        **({"document": original} if can_be_opened(original) else {}),
+        "document": kept_document(original, item, options),
         "document_key": item.ref.key,
-        **catalog_metadata(catalog, source),
+        **catalog_metadata(catalog, source, options),
     }
     error = None
     try:
