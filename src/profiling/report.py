@@ -232,7 +232,7 @@ def field_lines(p: CollectionProfile) -> list[str]:
     for f in p.fields:
         lines.append(
             f"      [{SOURCE_LABEL.get(f.provenance, '?')}] {f.name:<20} "
-            f"{f.coverage:>4.0%} filled   {use_of(f)}"
+            f"{round(f.coverage * 10_000) // 100:>3}% filled   {use_of(f)}"
         )
         if f.note:
             lines.append(f"               {f.note}")

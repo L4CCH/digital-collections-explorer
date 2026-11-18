@@ -506,7 +506,7 @@ def catalog_field(column: str, values: list, object_column: str | None) -> Field
         name=column,
         type=infer_type(present),
         provenance=Provenance.CATALOG,
-        coverage=round(len(present) / max(1, len(values)), 4),
+        coverage=len(present) * 10_000 // max(1, len(values)) / 10_000,
         cardinality=distinct,
         sample_values=[str(v)[:60] for v in present[:3]],
         searchable=read_as in SEARCHED_AS,

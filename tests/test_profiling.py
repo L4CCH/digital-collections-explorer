@@ -93,6 +93,27 @@ def test_sizing_is_never_empty(profile):
     assert profile.sizing.embed_seconds["compute"] > 0
 
 
+def test_a_column_with_one_empty_row_in_thousands_is_not_called_full(tmp_path):
+    import duckdb
+
+    from src.profiling.sources import ParquetManifestSource
+
+    titles = ", ".join(
+        f"('images/{n}.jpg', {'NULL' if n == 7 else repr(f'Work {n}')})"
+        for n in range(2003)
+    )
+    path = tmp_path / "manifest.parquet"
+    duckdb.execute(
+        f"COPY (SELECT * FROM (VALUES {titles}) AS t(image_url, title)) "
+        f"TO '{path}' (FORMAT PARQUET)"
+    )
+    profile = profile_collection(
+        ParquetManifestSource(str(path)), "test", sample=5, progress=False
+    )
+    assert profile.field("title").coverage == 0.9995
+    assert " 99% filled" in render(profile)
+
+
 def test_report_is_plain_ascii_english(profile):
     assert render(profile).isascii()
 

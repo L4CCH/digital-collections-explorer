@@ -217,6 +217,17 @@ def repeated_note(kept: list, again: list) -> str:
     return note
 
 
+def kept_where(images: str) -> str:
+    if images == "link":
+        return (
+            "Images: shown from the source, and copied only where it cannot show them"
+        )
+    kept = f"Thumbnails: {settings.thumbnails_dir}"
+    if images == "copy":
+        kept += f" | Processed images: {settings.processed_data_dir}"
+    return kept
+
+
 def kept_by_path(state: IngestState, refs: list) -> int:
     pairs = [
         (make_item_id(ref.name), make_item_id(ref.key), ref.key)
@@ -379,10 +390,7 @@ def main() -> int:
         if args.estimated_seconds:
             state.remember("estimated_seconds", str(args.estimated_seconds))
         print(f"Model: {service.model_name} on {service.device}")
-        print(
-            f"Thumbnails: {settings.thumbnails_dir} | Processed images: "
-            f"{settings.processed_data_dir}\n"
-        )
+        print(f"{kept_where(args.images)}\n")
         options = Options(
             thumbnails_dir=Path(settings.thumbnails_dir),
             processed_dir=Path(settings.processed_data_dir),
