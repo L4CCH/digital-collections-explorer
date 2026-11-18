@@ -131,9 +131,11 @@ if settings.mcp:
     app.router.routes.extend(mcp_server.http_routes())
 
 
-@app.get("/api/health")
+@app.get(
+    "/api/health",
+    description="Health check endpoint, also identifies which collection is being served",
+)
 async def health_check():
-    """Health check endpoint, also identifies which collection is being served"""
     return {
         "status": "healthy",
         "collection": collection_name(),

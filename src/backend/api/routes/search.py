@@ -95,7 +95,11 @@ def open_upload(image_data: bytes) -> Image.Image:
         )
 
 
-@router.get("/text", response_model=SearchResponse)
+@router.get(
+    "/text",
+    response_model=SearchResponse,
+    description="Search by text: by appearance and, when the collection keeps records, by catalog text.",
+)
 async def search_by_text(
     query: str = Query(..., min_length=1, max_length=MAX_QUERY_CHARACTERS),
     limit: int = Query(
@@ -113,7 +117,6 @@ async def search_by_text(
     uncataloged: bool = Query(True, description=UNCATALOGED_DESCRIPTION),
     records: Optional[Set[str]] = Depends(records_in_query),
 ):
-    """Search by text: by appearance and, when the collection keeps records, by catalog text."""
     wanted = checked_groups(groups)
     hybrid = hybrid_search.index is not None
     if mode == "keyword" and not hybrid:
@@ -155,7 +158,11 @@ async def search_by_text(
             return SearchResponse(results=[])
 
 
-@router.post("/image", response_model=SearchResponse)
+@router.post(
+    "/image",
+    response_model=SearchResponse,
+    description="Search for images like an uploaded one, scored by cosine similarity.",
+)
 async def search_by_image(
     image: UploadFile = File(...),
     limit: int = Form(
@@ -169,7 +176,6 @@ async def search_by_image(
     uncataloged: bool = Form(True, description=UNCATALOGED_DESCRIPTION),
     records: Optional[Set[str]] = Depends(records_in_form),
 ):
-    """Search for images like an uploaded one, scored by cosine similarity."""
     wanted = checked_groups(groups)
     image_data = await read_upload(image)
 

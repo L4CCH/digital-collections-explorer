@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
+from fastapi import Path as PathParam
+from fastapi import Query
 from fastapi.responses import FileResponse, RedirectResponse
 
 from src.backend.core.config import settings
@@ -23,17 +25,11 @@ def resolve_path(path_str: str) -> Path:
     return Path(settings.data_dir) / path
 
 
-@router.get("/images/{id}")
+@router.get("/images/{id}", description="Serve an image based on its ID")
 async def get_image_by_id(
-    id: str, size: str = Query("full", description="Image size: 'thumbnail' or 'full'")
+    id: str = PathParam(description="The document ID"),
+    size: str = Query("full", description="Image size: 'thumbnail' or 'full'"),
 ):
-    """
-    Serve an image based on its ID
-
-    Args:
-        id: The document ID
-        size: Size of the image to return
-    """
     doc = embedding_service.get_document_by_id(id)
 
     if not doc:
@@ -58,14 +54,15 @@ async def get_image_by_id(
     return FileResponse(path, headers=CACHE_HEADERS)
 
 
-@router.get("/images/related/{source_id}")
-async def get_related_image(source_id: str):
-    """
-    Serve the thumbnail of a photo from another source that shows a record
-
-    Args:
-        source_id: The id of the photo in that source, such as flickr:2535935153
-    """
+@router.get(
+    "/images/related/{source_id}",
+    description="Serve the thumbnail of a photo from another source that shows a record",
+)
+async def get_related_image(
+    source_id: str = PathParam(
+        description="The id of the photo in that source, such as flickr:2535935153"
+    ),
+):
     metadata_db = Path(embedding_service.embeddings_dir) / METADATA_DB
     path_str = related_thumbnail(metadata_db, source_id)
 
@@ -80,14 +77,14 @@ async def get_related_image(source_id: str):
     return FileResponse(path, headers=CACHE_HEADERS)
 
 
-@router.get("/models/{id}")
-async def get_model(id: str):
-    """
-    Serve the 3D model of the object an image belongs to
-
-    Args:
-        id: The ID of an image whose metadata names the model
-    """
+@router.get(
+    "/models/{id}", description="Serve the 3D model of the object an image belongs to"
+)
+async def get_model(
+    id: str = PathParam(
+        description="The ID of an image whose metadata names the model"
+    ),
+):
     doc = embedding_service.get_document_by_id(id)
     address = ((doc or {}).get("metadata") or {}).get("model_url")
 
@@ -110,14 +107,11 @@ async def get_model(id: str):
     return FileResponse(path, media_type="model/gltf-binary", headers=CACHE_HEADERS)
 
 
-@router.get("/documents/{id}")
-async def get_document(id: str):
-    """
-    Serve the PDF a page was drawn from, to read in the browser
-
-    Args:
-        id: The ID of a page of the PDF
-    """
+@router.get(
+    "/documents/{id}",
+    description="Serve the PDF a page was drawn from, to read in the browser",
+)
+async def get_document(id: str = PathParam(description="The ID of a page of the PDF")):
     doc = embedding_service.get_document_by_id(id)
     address = ((doc or {}).get("metadata") or {}).get("document")
 
@@ -139,14 +133,8 @@ async def get_document(id: str):
     )
 
 
-@router.get("/static/{id}")
-async def get_original_document(id: str):
-    """
-    Serve the original document file
-
-    Args:
-        id: The document ID
-    """
+@router.get("/static/{id}", description="Serve the original document file")
+async def get_original_document(id: str = PathParam(description="The document ID")):
     doc = embedding_service.get_document_by_id(id)
 
     if not doc:
