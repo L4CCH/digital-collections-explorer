@@ -4,6 +4,7 @@ from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from pi_heif import register_heif_opener
 from PIL import Image
 
 from ...core.config import settings
@@ -22,6 +23,8 @@ from ...services.model_choice import choose_model
 from ...services.query_planner import SEARCH_MODES
 from ..categories import records_in_form, records_in_query
 from ..groups import GROUPS_DESCRIPTION, UNCATALOGED_DESCRIPTION, checked_groups
+
+register_heif_opener()
 
 choose_model(settings)
 model_service = create_embedding_service()

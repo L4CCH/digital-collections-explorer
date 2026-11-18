@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -65,6 +66,16 @@ def test_indexes_good_images_and_records_bad_ones(collection):
     assert (stats.done, stats.failed, stats.skipped) == (3, 1, 0)
     ((status, error, count),) = state.problems()
     assert status == "failed" and error.startswith("decode:") and count == 1
+
+
+def test_heic_and_avif_photos_are_indexed(tmp_path):
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    shutil.copy(Path(__file__).parent / "fixtures" / "red.heic", folder / "phone.heic")
+    Image.new("RGB", (64, 48), (30, 90, 200)).save(folder / "web.avif")
+    _, stats, _, refs = ingest(str(folder), tmp_path / "out")
+    assert sorted(r.key for r in refs) == ["phone.heic", "web.avif"]
+    assert (stats.done, stats.failed) == (2, 0)
 
 
 def test_output_is_a_collection_the_site_reads(collection):

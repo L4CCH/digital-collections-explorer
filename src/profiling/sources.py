@@ -8,8 +8,12 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import unquote, urlparse
 
+from pi_heif import register_heif_opener
+
 from src.backend.core.catalog_keys import IIIF_KEYS
 from src.backend.services.catalog_fields import iiif_info_from
+
+register_heif_opener()
 
 IMAGE_EXTS = {
     "jpg",
