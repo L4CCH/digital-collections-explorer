@@ -36,7 +36,7 @@ from .models import (
     Sizing,
     Structure,
 )
-from .sources import MODEL_EXTS, FileRef, Source, iiif_size
+from .sources import MODEL_EXTS, FileRef, Source, iiif_size, left_without_image
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Largest image seen in the Smithsonian NMAH collection was 123 megapixels.
@@ -215,6 +215,38 @@ def guess_dir_role(names: list[str]) -> tuple[bool, str]:
     return False, "unclear"
 
 
+def named(ref: FileRef) -> str:
+    if ref.extra.get("named_by_service"):
+        return ref.extra.get("iiif") or ref.key
+    return ref.extra.get("url") or ref.key
+
+
+def repeated_issues(images: list[FileRef], again: list[FileRef]) -> list[Issue]:
+    if not again:
+        return []
+    files = len({ref.key for ref in again})
+    issues = [
+        Issue(
+            kind="repeated_file",
+            count=files,
+            note=f"files named by more than one row, {files + len(again):,} rows in "
+            "all; each is indexed once, for the first row that names it",
+            examples=[named(again[0])],
+        )
+    ]
+    lost = left_without_image(images, again)
+    if lost:
+        issues.append(
+            Issue(
+                kind="no_image_left",
+                count=len(lost),
+                note="objects left out, since earlier rows name all their images",
+                examples=lost[:5],
+            )
+        )
+    return issues
+
+
 def scan(
     source: Source, sample: int, max_files: int | None, progress: bool
 ) -> tuple[ScanStats, list[FileRef], dict]:
@@ -225,9 +257,13 @@ def scan(
     unreadable: list[str] = []
     catalogs: list[FileRef] = []
 
+    seen: set[str] = set()
+    again: list[FileRef] = []
     for ref in source.iter_files():
         stats.total_files += 1
-        if ref.extra.get("unreadable"):
+        if ref.key in seen:
+            again.append(ref)
+        elif ref.extra.get("unreadable"):
             stats.unreadable_files += 1
             unreadable.append(ref.key)
         elif ref.is_junk:
@@ -250,6 +286,7 @@ def scan(
             other_exts[ref.ext or "no extension"] += 1
             if ref.ext in CATALOG_EXTS:
                 catalogs.append(ref)
+        seen.add(ref.key)
         if progress and stats.total_files % PROGRESS_EVERY_FILES == 0:
             print(f"    scanned {stats.total_files:,} files...", flush=True)
         if max_files and stats.total_files >= max_files:
@@ -260,6 +297,7 @@ def scan(
     stats.catalog_candidates = [
         catalog_candidate(ref) for ref in catalogs[:MAX_CATALOG_CANDIDATES]
     ]
+    stats.issues += repeated_issues(images, again)
     for name, count in junk.most_common(5):
         stats.issues.append(
             Issue(kind="junk_file", count=count, note=f"system file {name}")

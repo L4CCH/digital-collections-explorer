@@ -13,7 +13,7 @@ import numpy as np
 from pi_heif import register_heif_opener
 
 from src.backend.core.catalog_keys import IIIF_KEYS
-from src.backend.services.catalog_fields import iiif_info_from
+from src.backend.services.catalog_fields import iiif_info_from, object_id_from
 
 register_heif_opener()
 
@@ -88,6 +88,27 @@ def classify(
         extra=extra or {},
         size_known=size_known,
     )
+
+
+def once_each(refs) -> tuple[list[FileRef], list[FileRef]]:
+    first: dict[str, FileRef] = {}
+    again: list[FileRef] = []
+    for ref in refs:
+        if ref.key in first:
+            again.append(ref)
+        else:
+            first[ref.key] = ref
+    return list(first.values()), again
+
+
+def object_of(ref: FileRef) -> str | None:
+    found = object_id_from(ref.extra.get("row") or {})
+    return str(found).strip() if found else None
+
+
+def left_without_image(kept, again) -> list[str]:
+    shown = {object_of(ref) for ref in kept}
+    return sorted({object_of(ref) for ref in again} - shown - {None, ""})
 
 
 def is_parquet(uri: str) -> bool:

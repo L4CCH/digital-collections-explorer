@@ -16,7 +16,7 @@ from src.backend.services.index_info import (
     read_index_info,
 )
 from src.collection.catalog import group_id_warning
-from src.profiling.sources import open_source
+from src.profiling.sources import left_without_image, once_each, open_source
 
 from .documents import INSTALL_HINT, can_read_pdfs
 from .export import write_from_state
@@ -35,6 +35,7 @@ from .related import (
     manifest_keys,
     read_related,
     related_problems,
+    such_as,
     they,
 )
 from .report import cloud_machine_type, render_report, run_report
@@ -188,6 +189,22 @@ def summary(state: IngestState, embeddings_dir: Path, data_dir: str | None) -> d
     }
 
 
+def repeated_note(kept: list, again: list) -> str:
+    files = len({ref.key for ref in again})
+    note = (
+        f"The manifest names {counted(files, 'file', 'files')} in more than one row, "
+        f"{files + len(again):,} rows in all; each file is indexed once, for the "
+        "first row that names it."
+    )
+    lost = left_without_image(kept, again)
+    if lost:
+        note += (
+            f" That leaves {counted(len(lost), 'object', 'objects')} without an "
+            f"image, such as {such_as(lost)}; {they(len(lost))} left out."
+        )
+    return note
+
+
 def readable_files(refs: list) -> tuple[list, str | None]:
     """The files this install can read, and how many PDFs it has to leave out"""
     documents = sum(1 for ref in refs if ref.is_document)
@@ -261,6 +278,9 @@ def main() -> int:
         ),
         key=lambda ref: ref.key,
     )
+    refs, again = once_each(refs)
+    if again:
+        print(repeated_note(refs, again))
     if args.limit:
         refs = refs[: args.limit]
     catalog = source.catalog_rows()
