@@ -241,3 +241,12 @@ def test_siglip2_vectors_are_sized_like_siglip_and_wider_than_clip():
     }
     assert width["siglip2"] == width["siglip"] == 1_000 * 768 * 4
     assert width["clip"] == 1_000 * 512 * 4
+
+
+def test_only_columns_read_as_notes_are_said_to_be_unknown():
+    from src.profiling.profiler import catalog_field
+
+    unknown = "Read as notes, since the site does not know this column name."
+    assert catalog_field("mystery", ["a long note"], None).note == unknown
+    assert catalog_field("source_url", ["https://example.org/1"], None).note == ""
+    assert catalog_field("description", ["a long note"], None).note == ""

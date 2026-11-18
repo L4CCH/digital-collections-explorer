@@ -36,7 +36,7 @@ from .models import (
     Sizing,
     Structure,
 )
-from .sources import MODEL_EXTS, FileRef, Source
+from .sources import MODEL_EXTS, FileRef, Source, iiif_size
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Largest image seen in the Smithsonian NMAH collection was 123 megapixels.
@@ -342,6 +342,14 @@ def sample_images(source: Source, images: list[FileRef], count: int) -> dict:
     step = max(1, len(images) // count)
     widths, heights, modes = [], [], Counter()
     for ref in images[::step][:count]:
+        service = ref.extra.get("iiif")
+        if service:
+            size = iiif_size(service)
+            if size:
+                result["sampled"] += 1
+                widths.append(size[0])
+                heights.append(size[1])
+            continue
         head = source.read_bytes(ref, HEAD_BYTES)
         if head is None:
             continue
@@ -473,7 +481,7 @@ def catalog_field(column: str, values: list, object_column: str | None) -> Field
         )
     elif read_as is None:
         profile.note = "Holds no catalog text, only numbers or addresses."
-    elif kind_of(column) is None:
+    elif read_as == "notes" and kind_of(column) is None:
         profile.note = "Read as notes, since the site does not know this column name."
     elif filtered_as and distinct == 1:
         profile.note = f"Only one value ({str(present[0])[:40]}) to filter by."
@@ -861,13 +869,14 @@ def profile_collection(
     model_type: str = "siglip",
 ) -> CollectionProfile:
     stats, images, deep = scan(source, sample, max_files, progress)
-    signals = directory_signals(images)
+    named = [ref for ref in images if not ref.extra.get("named_by_service")]
+    signals = directory_signals(named)
     fields, structure = infer_fields(source, images, deep, signals)
     return CollectionProfile(
         collection_id=collection_id,
         source=source.describe(),
         scan=stats,
-        name_patterns=name_patterns(images),
+        name_patterns=name_patterns(named),
         directory_signals=signals,
         fields=fields,
         structure=structure,

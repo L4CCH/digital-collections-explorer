@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-import json
 import os
 import queue
 import shutil
@@ -27,7 +26,7 @@ from src.backend.services.catalog_fields import (
     source_url_from,
     view_orbit_from,
 )
-from src.profiling.sources import FileRef, Source, fetch_web
+from src.profiling.sources import FileRef, Source, fetch_web, iiif_size
 
 from .documents import Pdf, page_key
 from .state import IngestState, Result
@@ -264,15 +263,6 @@ def origin_of(source: Source, ref: FileRef) -> Origin:
         thumbnail=next((value for value in thumbnails if is_web_address(value)), None),
         image=source.web_image_address(ref),
     )
-
-
-def iiif_size(service: str) -> tuple[int, int] | None:
-    fetched = fetch_web(f"{service}/info.json")
-    try:
-        info = json.loads(fetched[0])
-        return int(info["width"]), int(info["height"])
-    except Exception:
-        return None
 
 
 def read_image(source: Source, options: Options, item: Item) -> bytes | None:

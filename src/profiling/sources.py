@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import time
@@ -105,6 +106,15 @@ def fetch_web(url: str, limit: int | None = None) -> tuple[bytes, str] | None:
         return None
 
 
+def iiif_size(service: str) -> tuple[int, int] | None:
+    fetched = fetch_web(f"{service}/info.json")
+    try:
+        info = json.loads(fetched[0])
+        return int(info["width"]), int(info["height"])
+    except Exception:
+        return None
+
+
 def s3_client(anonymous: bool, region: str):
     import boto3
     from botocore import UNSIGNED
@@ -150,7 +160,6 @@ class Source:
         picks = [r for r in refs if PROBE_MIN_BYTES < r.size < PROBE_MAX_BYTES][
             :PROBE_FILES
         ]
-        picks = picks or refs[:PROBE_FILES]
         if not picks:
             return 0.0
         started = time.time()
@@ -371,6 +380,10 @@ class ParquetManifestSource(Source):
             key = unquote(urlparse(url).path).lstrip("/") if "://" in url else url
             size = int(values[size_index] or 0) if size_index is not None else 0
             extra = {"url": url, "row": row, "named_by_service": named_by_service}
+            if self.iiif_column:
+                info = iiif_info_from({self.iiif_column: row.get(self.iiif_column)})
+                if info:
+                    extra["iiif"] = info.removesuffix("/info.json")
             if vectors and vectors[index] is not None:
                 extra["vector"] = vectors[index]
             yield classify(key, size, extra)

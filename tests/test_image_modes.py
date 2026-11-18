@@ -11,7 +11,7 @@ from src.backend.services.catalog_fields import image_source, image_urls
 from src.ingest.pipeline import Options, make_item_id, run
 from src.ingest.state import IngestState
 from src.profiling.models import FieldProfile
-from src.profiling.profiler import image_decision
+from src.profiling.profiler import image_decision, profile_collection
 from src.profiling.sources import ParquetManifestSource
 from tests.test_ingest import FakeService
 
@@ -163,6 +163,19 @@ def test_what_the_source_cannot_show_is_still_copied(server, tmp_path):
     assert image_source(by_name["a.jpg"], "full") == f"{address}/files/a.jpg"
     assert (kept / image_source(by_name["a.jpg"], "thumbnail")).exists()
     assert image_urls(by_name["b.tif"]) == {}
+
+
+def test_the_profile_reads_only_the_size_of_images_an_iiif_service_names(
+    server, tmp_path
+):
+    address, asked = server
+    rows = [[f"{address}/iiif/map-{n}"] for n in range(3)]
+    profile = profile_collection(manifest(tmp_path, ["iiif"], rows), "maps", sample=3)
+    assert asked and all(path.endswith("/info.json") for path in asked)
+    width = profile.scan.dimensions["width"]
+    assert (profile.scan.sampled, width["p50"]) == (3, ORIGINAL[0])
+    assert profile.directory_signals == [] and profile.name_patterns == []
+    assert profile.field("iiif").note == ""
 
 
 def test_the_profile_asks_what_to_keep_only_when_the_source_can_show_images():
