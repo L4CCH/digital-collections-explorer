@@ -77,9 +77,12 @@ $PY -m src.profiling manifest.parquet --json /tmp/profile.json
 ```
 
 Use `--anonymous` for a public bucket, and leave it off when
-`aws_credentials_found` is true and the bucket is private. A manifest names each
-image in a column such as `image_url`, or only by its IIIF service in a column
-such as `iiif`, with any catalog fields beside it, and a `group` column when
+`aws_credentials_found` is true and the bucket is private. The profile reads
+one file, or one IIIF `info.json`, for each of 300 sampled images (`--sample`);
+add `--requests-per-second` when the source asks for a slow pace. A manifest
+names each image in a column such as `image_url`, or only by its IIIF service
+in a column such as `iiif`, with any catalog fields beside it, and a `group`
+column when
 the site holds several institutions or museums. [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/)
 lists the columns the site reads and shows how to make a manifest from a
 spreadsheet, a collection system's export or IIIF manifests. Read the printed report and
@@ -173,10 +176,12 @@ $PY -m src.ingest SOURCE --data-dir data/collections/NAME --images MODE \
 `SECONDS` is `sizing.embed_seconds.estimated` from the profile, so the report
 can compare it with what happened. When there is none, the profile could not
 time downloading: first index a few hundred with `--limit` into the same folder,
-without `--estimated-seconds`, and work out `SECONDS` for the whole collection
-from `run.images_per_second` in that run's summary. The full run goes on from
-there. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2. For
-items elsewhere from a source, add `--related data/sources/NAME/related.parquet`.
+without `--estimated-seconds` and with `--json
+data/collections/NAME/sample_summary.json`, and work out a rough `SECONDS` for
+the whole collection from `run.images_per_second` in that summary. The full run
+goes on from there. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2.
+For items elsewhere from a source, add
+`--related data/sources/NAME/related.parquet`.
 `--limit N` indexes the first N files in name order for a sample, which may all
 come from one folder: say so.
 
@@ -184,12 +189,19 @@ come from one folder: say so.
   `$PY -m src.ingest --status --data-dir data/collections/NAME`.
 - It can be stopped at any time. The same command continues where it left off.
   `--retry-failed` tries failed images again.
-- `--download-workers` sets how many files are fetched at once, 16 by default.
-  Lower it when the source asks for a slow pace.
+- `--requests-per-second N` keeps indexing to N requests a second to web
+  servers. Use what a source's terms ask; when they say nothing about its image
+  server, keep to a few a second, such as 4. Each image with an IIIF service
+  takes two requests, the image and its `info.json`, and only the `info.json`
+  when the manifest gives its vector and `--images` is `link`.
 - Originals are never stored. An image with an IIIF service is requested from
-  it at the size needed, not downloaded whole.
-- A few failures are normal. Report the count and the reasons from `problems`,
-  and investigate only above a few percent.
+  it at the size needed, not downloaded whole, unless the server refuses that
+  size, as one that keeps only a few fixed sizes does.
+- A request that fails for a moment is tried again for about half a minute. A
+  few failures are normal. Report the count and the reasons from `problems`,
+  which say what happened, such as `the server answered 404 Not Found` or `the
+  server could not be reached`, and investigate only above a few percent, with
+  [references/troubleshooting.md](references/troubleshooting.md).
 - Each page of a PDF becomes an image of its document, and the document's page
   shows them in order.
 - `$PY -m src.ingest --report --data-dir data/collections/NAME` describes a run

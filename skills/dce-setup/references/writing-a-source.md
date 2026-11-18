@@ -35,7 +35,10 @@ name, so that it writes `manifest.parquet` beside itself. Git ignores
 - Page through the records until a page comes back empty, and try a failed
   request again after a pause.
 - Send one request at a time, at the pace the terms allow, and stop before a
-  daily limit.
+  daily limit. Try a request again only when the failure may pass, as with a
+  lost connection or an answer of 429 or 5xx, not when the API refuses it.
+- Take a number of records on the command line, such as `python source.py 300`,
+  so the program can be tried on a sample.
 - Ask only for the fields you use, if the API allows it, so that its answers
   stay small.
 - Skip records without an image, and read every field with `.get`.
@@ -45,11 +48,14 @@ name, so that it writes `manifest.parquet` beside itself. Git ignores
   `date`, `creator`, `place`, `object_type`, and `technique`, from
   [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/#how-columns-are-read),
   and join several values with `; `.
+- When licenses differ from image to image, give each row its license and
+  credit line in columns such as `license` and `credit_line`. Each object's
+  page shows them, and `collection.json` can say that licenses vary.
 
 ## 3. Check it on a sample
 
-The first time, stop the program after a few hundred records, then profile what
-it wrote:
+The first time, run the program on a few hundred records, then profile what it
+wrote:
 
 ```bash
 $PY -m src.profiling data/sources/NAME/manifest.parquet
@@ -66,8 +72,9 @@ a few minutes, and continue with step 2 of SKILL.md, with
 
 The terms decide two things the profile cannot know. When they forbid copies of
 the images, index with `--images link`, whatever the profile recommends. When
-they ask for a slow pace, give `ingest` a low `--download-workers`, such as 1,
-since it fetches 16 images at once by default.
+they ask for a slow pace, give the profile and `ingest` `--requests-per-second`,
+such as 1. When they say nothing about the image server, keep to a few requests
+a second, such as 4.
 
 ## Items elsewhere and vectors
 
@@ -81,8 +88,10 @@ since it fetches 16 images at once by default.
 
 ## Tell the person
 
-Say where the program is, that running it again brings the collection up to
-date, and that it can move to a repository of its own. Say what the terms ask:
-the credit, which goes in `collection.json`, any limit on how the site may be
-used, and how long the data may be kept, with the date by which to run the
-program again or delete the collection.
+Say where the program is, and that it can move to a repository of its own.
+Running it again and indexing into the same folder adds new records, but
+records already indexed keep their catalog text, and records gone from the
+source stay on the site; to bring in changes and removals, index into a new
+folder. Say what the terms ask: the credit, which goes in `collection.json`, any
+limit on how the site may be used, and how long the data may be kept, with the
+date by which to delete the collection or index it anew into a new folder.

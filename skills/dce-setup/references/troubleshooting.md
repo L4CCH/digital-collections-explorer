@@ -42,11 +42,18 @@ The last option costs money and may conflict with data residency rules, so ask.
 
 ## Many images from an IIIF or web server fail to download
 
-The server may limit how fast one machine can ask, and many institutions do,
-or it may no longer have those images: the failures look the same. Open one of
-the failed addresses in a browser. If it still works, wait a while, then run the
-same command with `--retry-failed` and a lower `--download-workers`, such as 4.
-If it does not, the source has dropped those images: report how many.
+Each failure says why, in `problems` and in `--report`. Ingest has already
+tried every request again for about half a minute.
+
+- `the server could not be reached` or `did not answer`: this machine's network,
+  or the server, was down for longer than that. Check the network, then run the
+  same command with `--retry-failed`.
+- `the server answered 429` or `503`: the server limits how fast one machine can
+  ask, as many institutions' servers do. Wait a while, then run the same command
+  with `--retry-failed` and `--requests-per-second`, such as 2.
+- `the server answered 404`: the source no longer has those images, or the
+  manifest names them wrongly. Open one of the addresses in a browser, and
+  report how many.
 
 ## Many images fail with "decode" errors
 
