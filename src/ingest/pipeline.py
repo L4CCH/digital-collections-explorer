@@ -26,7 +26,15 @@ from src.backend.services.catalog_fields import (
     source_url_from,
     view_orbit_from,
 )
-from src.profiling.sources import FileRef, Source, fetch_web, iiif_size
+from src.profiling.sources import (
+    FileRef,
+    Source,
+    clear_unread,
+    fetch_web,
+    iiif_size,
+    size_refused,
+    unread_reason,
+)
 
 from .documents import Pdf, page_key
 from .state import IngestState, Result
@@ -271,6 +279,7 @@ def origin_of(source: Source, ref: FileRef) -> Origin:
 
 def read_image(source: Source, options: Options, item: Item) -> bytes | None:
     """The image, asked of its IIIF service at the size this mode needs when there is one"""
+    clear_unread()
     service = item.origin.service
     if service:
         edge = PROCESSED_EDGE if options.images == "copy" else MODEL_INPUT_EDGE
@@ -278,6 +287,8 @@ def read_image(source: Source, options: Options, item: Item) -> bytes | None:
         if fetched and fetched[1].startswith("image/"):
             item.original_size = iiif_size(service)
             return fetched[0]
+        if fetched is None and not size_refused():
+            return None
     return source.read_bytes(item.ref)
 
 
@@ -310,7 +321,11 @@ def download_worker(
         try:
             item.blob = read_image(source, options, item)
             if item.blob is None:
-                raise IOError("the file could not be read from the source")
+                reason = unread_reason()
+                raise IOError(
+                    "the file could not be read from the source"
+                    + (f": {reason}" if reason else "")
+                )
             item.bytes_read = len(item.blob)
             with stats.lock:
                 stats.bytes_in += item.bytes_read

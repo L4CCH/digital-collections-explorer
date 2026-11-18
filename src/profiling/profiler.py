@@ -98,6 +98,8 @@ WEB_IMAGE_SAMPLE = 50
 MAX_CATALOG_CANDIDATES = 10
 
 TINY_IMAGE_BYTES = 10_240
+# Sampling stops after this many files in a row could not be read.
+SAMPLE_MISSES = 5
 LARGE_SOURCE_BYTES = 20 * 1024**3
 PROGRESS_EVERY_FILES = 20_000
 TYPE_SAMPLE_ROWS = 500
@@ -380,16 +382,21 @@ def sample_images(source: Source, images: list[FileRef], count: int) -> dict:
         return result
     step = max(1, len(images) // count)
     widths, heights, modes = [], [], Counter()
+    misses = 0
     for ref in images[::step][:count]:
+        if misses >= SAMPLE_MISSES:
+            break
         service = ref.extra.get("iiif")
         if service:
             size = iiif_size(service)
+            misses = 0 if size else misses + 1
             if size:
                 result["sampled"] += 1
                 widths.append(size[0])
                 heights.append(size[1])
             continue
         head = source.read_bytes(ref, HEAD_BYTES)
+        misses = 0 if head is not None else misses + 1
         if head is None:
             continue
         result["sampled"] += 1

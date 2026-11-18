@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Iterator
@@ -51,6 +54,10 @@ PROBE_FILES = 6
 PROBE_CONCURRENCY = 8
 S3_POOL_SIZE = 32
 HTTP_TIMEOUT_SECONDS = 30
+# Waits before trying a failed web request again, about half a minute in all.
+RETRY_WAITS = (1, 2, 4, 8, 16)
+MAX_RETRY_AFTER_SECONDS = 60
+TRANSIENT_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 USER_AGENT = "digital-collections-explorer (https://github.com/L4CCH/digital-collections-explorer)"
 
 
@@ -165,20 +172,73 @@ def per_second(text: str) -> float:
     return value
 
 
+UNREAD = threading.local()
+
+
+def clear_unread() -> None:
+    UNREAD.status, UNREAD.reason = None, ""
+
+
+def unread_reason() -> str:
+    return getattr(UNREAD, "reason", "")
+
+
+def size_refused() -> bool:
+    status = getattr(UNREAD, "status", None)
+    return status == 501 or (
+        status is not None and 400 <= status < 500 and status not in TRANSIENT_STATUSES
+    )
+
+
+def retry_after(error) -> float:
+    try:
+        return min(float(error.headers.get("Retry-After", 0)), MAX_RETRY_AFTER_SECONDS)
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
+def no_answer(error: Exception) -> str:
+    reason = getattr(error, "reason", error)
+    if isinstance(error, TimeoutError) or isinstance(reason, TimeoutError):
+        return f"the server did not answer within {HTTP_TIMEOUT_SECONDS} seconds"
+    if isinstance(error, urllib.error.URLError):
+        return f"the server could not be reached ({reason})"
+    return f"the connection broke off ({type(error).__name__}: {error})"
+
+
 def fetch_web(url: str, limit: int | None = None) -> tuple[bytes, str] | None:
     """The body and content type found at a web address, or None if it cannot be read"""
-    import urllib.request
-
     headers = {"User-Agent": USER_AGENT}
     if limit:
         headers["Range"] = f"bytes=0-{limit - 1}"
-    try:
+    clear_unread()
+    for wait in (*RETRY_WAITS, None):
         PACE.wait()
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            return response.read(), (response.headers.get("Content-Type") or "").lower()
-    except Exception:
-        return None
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(
+                request, timeout=HTTP_TIMEOUT_SECONDS
+            ) as response:
+                body = response.read()
+                kind = (response.headers.get("Content-Type") or "").lower()
+                clear_unread()
+                return body, kind
+        except urllib.error.HTTPError as error:
+            UNREAD.status = error.code
+            UNREAD.reason = f"the server answered {error.code} {error.reason}".strip()
+            if error.code not in TRANSIENT_STATUSES:
+                return None
+            if wait is not None:
+                wait = max(wait, retry_after(error))
+        except (OSError, http.client.HTTPException) as error:
+            UNREAD.status, UNREAD.reason = None, no_answer(error)
+        except Exception as error:
+            UNREAD.status, UNREAD.reason = None, f"{type(error).__name__}: {error}"
+            return None
+        if wait is None:
+            return None
+        time.sleep(wait)
+    return None
 
 
 def iiif_size(service: str) -> tuple[int, int] | None:
@@ -512,6 +572,7 @@ class ParquetManifestSource(Source):
         )
         if not (is_image or is_pdf):
             returned = content_type.split(";")[0] or "an unknown type"
+            UNREAD.reason = f"the address gives {returned}, not an image"
             self.fetch_note = (
                 f"The '{self.url_column or self.iiif_column}' column returns {returned}, "
                 f"not image data. "
