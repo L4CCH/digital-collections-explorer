@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -15,7 +15,7 @@ from src.collection.catalog import (
     merged,
     read_catalog,
 )
-from src.collection.writer import Group, Item, Model, Record, write_collection
+from src.collection.writer import Group, Item, Model, Record, Related, write_collection
 
 from .state import IngestState
 
@@ -60,6 +60,7 @@ def write_from_state(
     model_type: str,
     model_name: str,
     model_revision: str | None = None,
+    related: Sequence[Related] = (),
 ) -> dict | None:
     """Write the collection from the files ingest has indexed; None when there are none"""
     ids, vectors, items = [], [], []
@@ -126,4 +127,5 @@ def write_from_state(
         items,
         records,
         {model.key: (ids, np.stack(vectors))},
+        related=related,
     )

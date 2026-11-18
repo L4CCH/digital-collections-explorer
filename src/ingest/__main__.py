@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 
 from src.backend.core.config import DeviceType, apply_data_dir, settings
+from src.backend.services.catalog_fields import object_id_from
 from src.backend.services.embedding_service_factory import create_embedding_service
 from src.backend.services.index_info import (
     KNOWN_DIMENSIONS,
@@ -29,6 +30,7 @@ from .pipeline import (
     make_item_id,
     run,
 )
+from .related import counted, kept_related, read_related, related_problems, they
 from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
 
@@ -116,6 +118,12 @@ def parse_args() -> argparse.Namespace:
         help="what the site keeps of images their source can also show: copies "
         "(default), thumbnails only, or nothing (link), for rows that name an "
         "IIIF service or a web address",
+    )
+    parser.add_argument(
+        "--related",
+        help="a parquet table of items elsewhere that show the manifest's objects: "
+        "object_id, source, and source_id, and if known url, title, thumbnail, "
+        "rights, rights_url, counts, tags, image, and link_type",
     )
     parser.add_argument(
         "--retry-failed",
@@ -266,6 +274,21 @@ def main() -> int:
         print(f"Leaving out {unread}. Reading them needs one more package:")
         print(f"  {INSTALL_HINT}")
     documents = sum(1 for ref in refs if ref.is_document)
+    related_rows: list[dict] = []
+    if args.related:
+        columns, related_rows = read_related(args.related)
+        object_ids = {
+            str(found).strip()
+            for found in (object_id_from(ref.extra.get("row") or {}) for ref in refs)
+            if found
+        }
+        addresses = {ref.extra["url"] for ref in refs if ref.extra.get("url")}
+        refused, notes = related_problems(columns, related_rows, object_ids, addresses)
+        for line in refused + notes:
+            print(line)
+        if refused:
+            state.close()
+            return 2
 
     ids = [make_item_id(ref.key) for ref in refs]
     state.seed([(item_id, ref.key, ref.size) for item_id, ref in zip(ids, refs)])
@@ -328,12 +351,36 @@ def main() -> int:
         for status, error, count in state.problems():
             print(f"  {status:<8} {count:>6,}  {error}")
 
+    related = []
+    if related_rows:
+        data_dir = Path(settings.data_dir) if settings.data_dir else None
+        root = kept_root(data_dir, Path(settings.processed_data_dir)) / "related"
+        image_ids = {
+            ref.extra["url"]: make_item_id(ref.key)
+            for ref in refs
+            if ref.extra.get("url")
+        }
+        related, unread = kept_related(
+            related_rows,
+            image_ids,
+            root,
+            data_dir,
+            Path(args.related).resolve().parent,
+            args.download_workers,
+        )
+        if unread:
+            print(
+                "Could not read the thumbnails of "
+                f"{counted(unread, 'related item', 'related items')}; "
+                f"{they(unread)} listed without one."
+            )
     written = write_from_state(
         state,
         embeddings_dir,
         settings.model_type.value,
         settings.model_name,
         settings.model_revision,
+        related,
     )
     if written:
         state.remember("collection", json.dumps(written))
