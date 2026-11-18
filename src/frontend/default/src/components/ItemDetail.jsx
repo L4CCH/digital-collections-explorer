@@ -85,10 +85,12 @@ function ItemDetail({ id, collection, canGoBack }) {
     });
     return [...byLabel.entries()];
   }, [object]);
-  const groupLabels = useMemo(
-    () => Object.fromEntries((collection?.groups || []).map((group) => [group.id, group.label])),
-    [collection],
-  );
+  const groupLabels = useMemo(() => {
+    const groups = collection?.groups || [];
+    return groups.length > 1
+      ? Object.fromEntries(groups.map((group) => [group.id, group.label]))
+      : {};
+  }, [collection]);
   const groupsById = useMemo(
     () => new Map((collection?.groups || []).map((group) => [group.id, group])),
     [collection],

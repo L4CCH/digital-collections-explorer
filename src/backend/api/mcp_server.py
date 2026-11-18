@@ -126,7 +126,7 @@ class Found(BaseModel):
         description="The catalog title; empty when the image has no catalog record"
     )
     group: Optional[str] = Field(
-        description="The group it belongs to, such as a museum"
+        description="The group it belongs to, such as a museum; empty when the site has only one"
     )
     images: int = Field(description="How many images the object has")
     why: Optional[str] = Field(
@@ -294,7 +294,12 @@ async def allow(ctx: Context) -> None:
 
 
 def group_labels(collection: Dict[str, Any]) -> Dict[str, str]:
-    return {g["id"]: g["label"] for g in collection.get("groups") or []}
+    groups = collection.get("groups") or []
+    return {g["id"]: g["label"] for g in groups} if len(groups) > 1 else {}
+
+
+def group_name(labels: Dict[str, str], group: Optional[str]) -> Optional[str]:
+    return labels.get(group, group) if labels else None
 
 
 def found(
@@ -308,7 +313,7 @@ def found(
         id=image_id,
         object_id=result.get("object_id") or metadata.get("object_id"),
         title=metadata.get("title"),
-        group=labels.get(metadata.get("group"), metadata.get("group")),
+        group=group_name(labels, metadata.get("group")),
         images=result.get("image_count") or 1,
         why=result.get("explanation") or ("Looks similar" if by_image else None),
         similarity=None if similarity is None else round(float(similarity), 3),
@@ -391,9 +396,12 @@ def group_of(collection: Dict[str, Any], group: Optional[str]) -> Dict[str, Any]
     return next((g for g in collection.get("groups") or [] if g["id"] == group), {})
 
 
-@server.tool(title="Describe the collection", annotations=READ_ONLY)
+@server.tool(
+    title="Describe the collection",
+    description="What the collection holds: its groups and their sizes, and what search can do",
+    annotations=READ_ONLY,
+)
 async def describe_collection() -> CollectionSummary:
-    """What the collection holds: its groups and their sizes, and what search can do"""
     collection = await browse.describe_collection()
     return CollectionSummary(
         title=collection.get("title") or "",
@@ -424,7 +432,10 @@ async def describe_collection() -> CollectionSummary:
 
 
 @server.tool(
-    title="Search the collection", annotations=READ_ONLY, meta=SHOWN_ON_THE_WALL
+    title="Search the collection",
+    description="Find objects by what their images show and by their catalog records",
+    annotations=READ_ONLY,
+    meta=SHOWN_ON_THE_WALL,
 )
 async def search_collection(
     query: Annotated[
@@ -453,7 +464,6 @@ async def search_collection(
     limit: Limit = 10,
     page: Page = 1,
 ) -> SearchAnswer:
-    """Find objects by what their images show and by their catalog records"""
     await allow(ctx)
     records = wanted_records(catalog)
     try:
@@ -489,7 +499,10 @@ async def search_collection(
 
 
 @server.tool(
-    title="Find similar objects", annotations=READ_ONLY, meta=SHOWN_ON_THE_WALL
+    title="Find similar objects",
+    description="Objects whose images look most like this one, in some groups or in all",
+    annotations=READ_ONLY,
+    meta=SHOWN_ON_THE_WALL,
 )
 async def find_similar(
     id: Annotated[str, Field(description="An id from search_collection or get_object")],
@@ -498,7 +511,6 @@ async def find_similar(
     catalog: Catalog = None,
     limit: Limit = 10,
 ) -> LookAlikes:
-    """Objects whose images look most like this one, in some groups or in all"""
     await allow(ctx)
     records = wanted_records(catalog)
     try:
@@ -518,7 +530,10 @@ async def find_similar(
 
 
 @server.tool(
-    title="Search with an image", annotations=READ_ONLY, meta=SHOWN_ON_THE_WALL
+    title="Search with an image",
+    description="Objects whose images look like a collection image, part of one, or your own",
+    annotations=READ_ONLY,
+    meta=SHOWN_ON_THE_WALL,
 )
 async def search_by_image(
     ctx: Context,
@@ -543,7 +558,6 @@ async def search_by_image(
     limit: Limit = 10,
     page: Page = 1,
 ) -> LookAlikes:
-    """Objects whose images look like a collection image, part of one, or your own"""
     if (id is None) == (image_data is None):
         raise ToolError("Give either id or image_data")
     await allow(ctx)
@@ -574,7 +588,11 @@ async def search_by_image(
     )
 
 
-@server.tool(title="List catalog values", annotations=READ_ONLY)
+@server.tool(
+    title="List catalog values",
+    description="The values the catalog uses for one field, the most common first, to filter by",
+    annotations=READ_ONLY,
+)
 async def list_catalog_values(
     category: Annotated[Category, Field(description="The catalog field to list")],
     contains: Annotated[
@@ -583,7 +601,6 @@ async def list_catalog_values(
     ] = None,
     limit: Annotated[int, Field(ge=1, le=browse.MAX_VALUES)] = 30,
 ) -> CatalogValues:
-    """The values the catalog uses for one field, the most common first, to filter by"""
     try:
         listed = await browse.list_catalog_values(category, contains, limit)
     except HTTPException as refusal:
@@ -593,14 +610,17 @@ async def list_catalog_values(
     )
 
 
-@server.tool(title="Get an object", annotations=READ_ONLY)
+@server.tool(
+    title="Get an object",
+    description="One object: its catalog record, its images, and where else it appears",
+    annotations=READ_ONLY,
+)
 async def get_object(
     id: Annotated[
         str, Field(description="An id from search_collection or find_similar")
     ],
     ctx: Context,
 ) -> ObjectDetails:
-    """One object: its catalog record, its images, and where else it appears"""
     try:
         item = await browse.get_item(id)
     except HTTPException as refusal:
@@ -614,7 +634,7 @@ async def get_object(
     return ObjectDetails(
         id=item["id"],
         title=metadata.get("title"),
-        group=labels.get(metadata.get("group"), metadata.get("group")),
+        group=group_name(labels, metadata.get("group")),
         page=f"{site}/#/item/{quote(item['id'], safe='')}",
         institution=group.get("institution") or collection.get("institution"),
         record=metadata.get("source_url"),

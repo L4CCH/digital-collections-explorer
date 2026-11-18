@@ -267,7 +267,9 @@ def test_a_pdf_with_a_record_is_one_cataloged_object_of_pages(tmp_path, monkeypa
     assert item["object_id"] == "rep-1" and item["image_count"] == 3
     page = item["metadata"]
     assert (page["type"], page["page"], page["pages"]) == ("pdf_page", 2, 3)
-    assert page["document"] == str(root / "report.pdf")
+    assert (data_dir / page["document"]).read_bytes() == (
+        root / "report.pdf"
+    ).read_bytes()
     assert page["title"] == "Annual report"
     assert collection.info()["documents"] == 1
     assert "rep-1" not in collection.uncataloged_objects

@@ -717,6 +717,7 @@ def estimate_sizing(stats: ScanStats, bandwidth_bps: float, model_type: str) -> 
         index_bytes=vectors,
         device=device,
         thumbnails_bytes=round(count * image_bytes),
+        documents_bytes=stats.document_bytes,
         db_bytes=count * DB_BYTES_PER_ITEM,
         serving_ram_bytes=vectors + SERVING_BASE_RAM_BYTES,
         source_bytes=stats.total_bytes,

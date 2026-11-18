@@ -8,8 +8,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/embeddings", tags=["embeddings"])
 
 
-@router.get("/count")
+@router.get("/count", description="Return the total number of embeddings.")
 async def get_total_embeddings():
-    """Return the total number of embeddings."""
     count = embedding_service.get_embedding_count()
     return {"count": count}

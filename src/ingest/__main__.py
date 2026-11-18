@@ -20,7 +20,7 @@ from src.profiling.sources import open_source
 
 from .documents import INSTALL_HINT, can_read_pdfs
 from .export import write_from_state
-from .pipeline import IMAGE_MODES, Options, clock, make_item_id, run
+from .pipeline import IMAGE_MODES, Options, clock, kept_root, make_item_id, run
 from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
 
@@ -127,10 +127,16 @@ def folder_bytes(folder: Path) -> int:
 
 
 def measured_disk_bytes(embeddings_dir: Path) -> dict:
+    kept = kept_root(
+        Path(settings.data_dir) if settings.data_dir else None,
+        Path(settings.processed_data_dir),
+    )
     folders = {
         "index": embeddings_dir,
         "thumbnails": Path(settings.thumbnails_dir),
         "processed": Path(settings.processed_data_dir),
+        "documents": kept / "documents",
+        "models": kept / "models",
     }
     sizes = {
         name: folder_bytes(path) for name, path in folders.items() if path.exists()

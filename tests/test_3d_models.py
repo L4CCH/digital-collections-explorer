@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -258,6 +259,40 @@ def test_a_model_kept_on_the_site_is_served_and_a_remote_one_is_linked(
 
     response = serve_model(images_route, monkeypatch, MODEL)
     assert response.status_code == 307 and response.headers["location"] == MODEL
+
+
+def test_a_model_on_this_machine_is_kept_in_the_collection_and_served_without_it(
+    images_route, monkeypatch, tmp_path
+):
+    source_dir = tmp_path / "source"
+    (source_dir / "views").mkdir(parents=True)
+    Image.new("RGB", (300, 120), (200, 190, 180)).save(source_dir / "views" / "00.jpg")
+    (source_dir / "stele.glb").write_bytes(b"glTF model")
+    manifest = source_dir / "views.parquet"
+    row = {"image_url": "views/00.jpg", "size_bytes": 1000, "object_id": "stele-1"}
+    write_manifest(manifest, [{**row, "model_url": "stele.glb"}])
+    source = ParquetManifestSource(str(manifest))
+    (ref,) = list(source.iter_files())
+    data_dir = tmp_path / "site"
+    state = IngestState(str(data_dir / "embeddings" / "state.sqlite"), commit_every=1)
+    state.seed([(make_item_id(ref.key), ref.key, ref.size)])
+    options = Options(
+        thumbnails_dir=data_dir / "thumbnails",
+        processed_dir=data_dir / "processed",
+        data_dir=data_dir,
+        download_workers=1,
+        decode_workers=1,
+        batch_size=1,
+    )
+    run(source, [ref], FakeService(), state, options)
+    ((_, _, metadata),) = list(state.done_rows())
+    kept = metadata["model_url"]
+    assert kept.startswith("models/") and kept.endswith(".glb")
+    assert (data_dir / kept).read_bytes() == b"glTF model"
+    shutil.rmtree(source_dir)
+    monkeypatch.setattr(images_route.settings, "data_dir", str(data_dir))
+    response = serve_model(images_route, monkeypatch, kept)
+    assert Path(response.path) == data_dir / kept
 
 
 @pytest.mark.parametrize("address", [None, "scene.gltf", "/no/such/model.glb"])

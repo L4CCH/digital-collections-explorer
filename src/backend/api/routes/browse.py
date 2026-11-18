@@ -17,13 +17,18 @@ MAX_SIMILAR = 100
 MAX_VALUES = 200
 
 
-@router.get("/collection")
+@router.get(
+    "/collection",
+    description="Name, size and suggested searches for the collection being served.",
+)
 async def describe_collection():
-    """Name, size and suggested searches for the collection being served."""
     return collection_service.info()
 
 
-@router.get("/items/sample")
+@router.get(
+    "/items/sample",
+    description="A varied handful of images to start wandering from, one per object.",
+)
 async def sample_items(
     limit: int = Query(60, ge=1, le=MAX_SAMPLE, description="How many images"),
     seed: Optional[int] = Query(None, description="Repeat a previous sample"),
@@ -32,7 +37,6 @@ async def sample_items(
     uncataloged: bool = Query(True, description=UNCATALOGED_DESCRIPTION),
     records: Optional[Set[str]] = Depends(records_in_query),
 ):
-    """A varied handful of images to start wandering from, one per object."""
     wanted = checked_groups(groups)
     known = not uncataloged
     return {
@@ -44,23 +48,27 @@ async def sample_items(
     }
 
 
-@router.get("/items/{item_id}")
+@router.get(
+    "/items/{item_id}",
+    description="One image, with the other images of the same object.",
+)
 async def get_item(item_id: str):
-    """One image, with the other images of the same object."""
     item = collection_service.item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
     return item
 
 
-@router.get("/items/{item_id}/similar")
+@router.get(
+    "/items/{item_id}/similar",
+    description="Images of other objects that look most like this one.",
+)
 async def get_similar_items(
     item_id: str,
     limit: int = Query(24, ge=1, le=MAX_SIMILAR, description="How many images"),
     groups: Optional[str] = Query(None, description=GROUPS_DESCRIPTION),
     records: Optional[Set[str]] = Depends(records_in_query),
 ):
-    """Images of other objects that look most like this one."""
     results = await run_in_threadpool(
         collection_service.similar, item_id, limit, checked_groups(groups), records
     )
@@ -69,14 +77,16 @@ async def get_similar_items(
     return {"results": results}
 
 
-@router.get("/items/{item_id}/similar-shape")
+@router.get(
+    "/items/{item_id}/similar-shape",
+    description="Other objects whose 3D models are most like this one's in form.",
+)
 async def get_items_similar_in_shape(
     item_id: str,
     limit: int = Query(24, ge=1, le=MAX_SIMILAR, description="How many objects"),
     groups: Optional[str] = Query(None, description=GROUPS_DESCRIPTION),
     records: Optional[Set[str]] = Depends(records_in_query),
 ):
-    """Other objects whose 3D models are most like this one's in form."""
     results = await run_in_threadpool(
         collection_service.similar_in_shape,
         item_id,
@@ -89,7 +99,10 @@ async def get_items_similar_in_shape(
     return {"results": results}
 
 
-@router.get("/categories/{category}")
+@router.get(
+    "/categories/{category}",
+    description="The values the catalog uses for one category, the most common first.",
+)
 async def list_catalog_values(
     category: Literal["object_type", "place", "culture", "topic", "name", "date"],
     contains: Optional[str] = Query(
@@ -97,7 +110,6 @@ async def list_catalog_values(
     ),
     limit: int = Query(30, ge=1, le=MAX_VALUES, description="How many values"),
 ):
-    """The values the catalog uses for one category, the most common first."""
     try:
         values = catalog_values(metadata_db(), category, contains, limit)
     except ValueError as e:

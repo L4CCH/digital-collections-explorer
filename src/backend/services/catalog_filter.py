@@ -32,13 +32,40 @@ def years(value: str) -> Optional[Tuple[int, int]]:
     return None
 
 
+def _fold(value: object) -> object:
+    return value.casefold() if isinstance(value, str) else value
+
+
 def _connect(path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con.create_function("fold", 1, _fold, deterministic=True)
+    return con
 
 
 def can_filter(path: Path) -> bool:
     """Whether the collection keeps catalog categories to filter by"""
     return path.exists() and has_table(path, "record_facets")
+
+
+def _values(con: sqlite3.Connection, facet: str) -> List[str]:
+    return [
+        value
+        for (value,) in con.execute(
+            "SELECT DISTINCT value FROM record_facets WHERE facet = ?", [facet]
+        )
+    ]
+
+
+def _records_with(con: sqlite3.Connection, facet: str, values: List[str]) -> Set[str]:
+    if not values:
+        return set()
+    marks = ",".join("?" * len(values))
+    rows = con.execute(
+        "SELECT DISTINCT record_id FROM record_facets "
+        f"WHERE facet = ? AND value IN ({marks})",
+        [facet, *values],
+    )
+    return {record for (record,) in rows}
 
 
 @lru_cache(maxsize=64)
@@ -53,33 +80,18 @@ def _matching(
     try:
         found: Optional[Set[str]] = None
         for facet, values in sorted(wanted):
-            marks = ",".join("?" * len(values))
-            rows = con.execute(
-                "SELECT DISTINCT record_id FROM record_facets "
-                f"WHERE facet = ? AND lower(value) IN ({marks})",
-                [facet, *values],
-            )
-            records = {record for (record,) in rows}
+            exact = [value for value in _values(con, facet) if _fold(value) in values]
+            records = _records_with(con, facet, exact)
             found = records if found is None else found & records
         if year_from is not None or year_to is not None:
             low = year_from if year_from is not None else float("-inf")
             high = year_to if year_to is not None else float("inf")
             dates = [
                 value
-                for (value,) in con.execute(
-                    "SELECT DISTINCT value FROM record_facets WHERE facet = 'date'"
-                )
+                for value in _values(con, "date")
                 if (span := years(value)) and span[0] <= high and span[1] >= low
             ]
-            records = set()
-            if dates:
-                marks = ",".join("?" * len(dates))
-                rows = con.execute(
-                    "SELECT DISTINCT record_id FROM record_facets "
-                    f"WHERE facet = 'date' AND value IN ({marks})",
-                    dates,
-                )
-                records = {record for (record,) in rows}
+            records = _records_with(con, "date", dates)
             found = records if found is None else found & records
         return frozenset(found or ())
     finally:
@@ -94,7 +106,7 @@ def matching_records(
 ) -> Optional[FrozenSet[str]]:
     """Records holding every asked-for category and a date in the years; None means all"""
     chosen = frozenset(
-        (facet, frozenset(v.strip().lower() for v in values if v.strip()))
+        (facet, frozenset(v.strip().casefold() for v in values if v.strip()))
         for facet, values in wanted.items()
         if any(v.strip() for v in values or ())
     )
@@ -122,9 +134,9 @@ def catalog_values(
     try:
         rows = con.execute(
             "SELECT value, COUNT(DISTINCT record_id) AS n FROM record_facets "
-            "WHERE facet = ? AND (? IS NULL OR lower(value) LIKE ?) "
+            "WHERE facet = ? AND (? IS NULL OR instr(fold(value), ?) > 0) "
             "GROUP BY value ORDER BY n DESC, value LIMIT ?",
-            [facet, contains, f"%{(contains or '').lower()}%", limit],
+            [facet, contains, (contains or "").casefold(), limit],
         )
         return [{"value": value, "records": n} for value, n in rows]
     finally:

@@ -249,6 +249,7 @@ def sizing_lines(p: CollectionProfile) -> list[str]:
     disk = (
         sizing.vectors_bytes
         + sizing.thumbnails_bytes
+        + sizing.documents_bytes
         + sizing.db_bytes
         + sizing.index_bytes
     )
