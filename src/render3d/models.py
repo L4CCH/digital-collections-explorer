@@ -15,6 +15,8 @@ from src.profiling.sources import URL_COLUMN_GUESSES, LocalDirSource, is_parquet
 
 IMAGE_COLUMN = "image_url"
 SIZE_COLUMN = "size_bytes"
+# Rows are read in batches of this many, so a wide manifest is never held twice.
+ROWS_AT_ONCE = 10_000
 OTHER_3D_EXTS = {"obj", "ply", "stl", "fbx", "dae", "3ds", "usdz", "usd", "e57"}
 
 
@@ -90,7 +92,10 @@ def read_rows(path: str) -> tuple[list[str], list[dict]]:
     quoted = path.replace("'", "''")
     relation = duckdb.connect().execute(f"SELECT * FROM {reader}('{quoted}')")
     columns = [column[0] for column in relation.description]
-    return columns, [dict(zip(columns, row)) for row in relation.fetchall()]
+    rows = []
+    while batch := relation.fetchmany(ROWS_AT_ONCE):
+        rows += [{c: v for c, v in zip(columns, row) if v is not None} for row in batch]
+    return columns, rows
 
 
 def image_column_of(columns: list[str]) -> str | None:
