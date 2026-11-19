@@ -48,6 +48,13 @@ name, so that it writes `manifest.parquet` beside itself. Git ignores
   `date`, `creator`, `place`, `object_type`, and `technique`, from
   [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/#how-columns-are-read),
   and join several values with `; `.
+- When the API gives each value a role or a label of its own, as an artist and
+  a person depicted, name the column for what it holds and put the label after a
+  colon, such as `creator: Artist` or `date: Date made`. Put values meant for
+  filters, such as names in a standard form, in a column with nothing after the
+  colon, such as `creator:`; they are searched and filtered but not shown.
+  [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/#display-and-indexing)
+  explains both.
 - When licenses differ from image to image, give each row its license and
   credit line in columns such as `license` and `credit_line`. Each object's
   page shows them, and `collection.json` can say that licenses vary.
