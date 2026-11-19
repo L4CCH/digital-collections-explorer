@@ -88,10 +88,9 @@ a second, such as 4.
 
 ## Tell the person
 
-Say where the program is, and that it can move to a repository of its own.
-Running it again and indexing into the same folder adds new records, but
-records already indexed keep their catalog text, and records gone from the
-source stay on the site; to bring in changes and removals, index into a new
-folder. Say what the terms ask: the credit, which goes in `collection.json`, any
-limit on how the site may be used, and how long the data may be kept, with the
-date by which to delete the collection or index it anew into a new folder.
+Say where the program is, that running it and the same `ingest` command again
+brings the site up to date, catalog text and removals included, and that it can
+move to a repository of its own. Say what the terms ask: the credit, which goes
+in `collection.json`, any limit on how the site may be used, and how long the
+data may be kept, with the date by which to run both again or delete the
+collection.

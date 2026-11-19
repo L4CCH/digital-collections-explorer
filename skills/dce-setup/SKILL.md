@@ -189,6 +189,11 @@ come from one folder: say so.
   `$PY -m src.ingest --status --data-dir data/collections/NAME`.
 - It can be stopped at any time. The same command continues where it left off.
   `--retry-failed` tries failed images again.
+- Run again after the source has changed, the same command brings the site up
+  to date: new files are indexed, catalog text is read again, and files the
+  source no longer lists leave the site but stay indexed. When more than a tenth
+  of the indexed files are gone at once, it stops instead; ask the person before
+  running it with `--allow-removals`.
 - `--requests-per-second N` keeps indexing to N requests a second to web
   servers. Use what a source's terms ask; when they say nothing about its image
   server, keep to a few a second, such as 4. Each image with an IIIF service
@@ -224,8 +229,8 @@ curl -s http://localhost:$PORT/api/health
 curl -s "http://localhost:$PORT/api/search/text?query=a%20portrait&limit=3"
 ```
 
-`collection` must equal `NAME`, `items` must equal `indexed` in the summary, and
-the search must return results.
+`collection` must equal `NAME`, `items` must equal `collection.items` in the
+summary, and the search must return results.
 
 Without a `collection.json` in `data/collections/NAME/`, the site shows a
 generic title and no suggested searches. Write one with the person from
