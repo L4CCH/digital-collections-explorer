@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
@@ -17,6 +17,7 @@ from src.collection.catalog import (
 )
 from src.collection.writer import Group, Item, Model, Record, Related, write_collection
 
+from .pipeline import read_again
 from .state import IngestState
 
 GROUP_COLUMN = "group"
@@ -61,13 +62,21 @@ def write_from_state(
     model_name: str,
     model_revision: str | None = None,
     related: Sequence[Related] = (),
+    catalog_now: Callable[[str], dict | None] | None = None,
 ) -> dict | None:
     """Write the collection from the files ingest has indexed; None when there are none"""
     ids, vectors, items = [], [], []
     groups: dict[str, str] = {}
     members: dict[str, list[dict]] = {}
     named: dict[str, bool] = {}
+    left_out = 0
     for item_id, embedding, metadata in state.done_rows():
+        if catalog_now is not None:
+            now = catalog_now(item_id)
+            if now is None:
+                left_out += 1
+                continue
+            metadata = read_again(metadata, now)
         catalog = metadata.get("catalog") or {}
         group, name = group_of(catalog)
         groups.setdefault(group, name)
@@ -120,7 +129,7 @@ def write_from_state(
         dimensions=len(vectors[0]),
         revision=model_revision,
     )
-    return write_collection(
+    written = write_collection(
         embeddings_dir,
         [model],
         [Group(key, groups[key]) for key in sorted(groups, key=groups.get)],
@@ -129,3 +138,4 @@ def write_from_state(
         {model.key: (ids, np.stack(vectors))},
         related=related,
     )
+    return {**written, "left_out": left_out}

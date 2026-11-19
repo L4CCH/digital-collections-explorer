@@ -15,8 +15,15 @@ def can_read_pdfs() -> bool:
     return importlib.util.find_spec(READER_PACKAGE) is not None
 
 
+PAGE_MARK = "#page="
+
+
 def page_key(document_key: str, number: int) -> str:
-    return f"{document_key}#page={number}"
+    return f"{document_key}{PAGE_MARK}{number}"
+
+
+def file_of(key: str) -> str:
+    return key.split(PAGE_MARK, 1)[0]
 
 
 class Pdf:

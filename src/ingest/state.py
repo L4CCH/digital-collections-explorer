@@ -113,6 +113,9 @@ class IngestState:
             finished.update(row[0] for row in rows)
         return finished
 
+    def done_keys(self) -> dict[str, str]:
+        return dict(self.con.execute("SELECT id, key FROM items WHERE status='done'"))
+
     def present(self, ids: list[str]) -> set[str]:
         found: set[str] = set()
         for start in range(0, len(ids), SQL_PARAMETER_CHUNK):

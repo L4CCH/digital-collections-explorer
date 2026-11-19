@@ -24,11 +24,12 @@ from src.profiling.sources import (
     per_second,
 )
 
-from .documents import INSTALL_HINT, can_read_pdfs
+from .documents import INSTALL_HINT, can_read_pdfs, file_of
 from .export import write_from_state
 from .pipeline import (
     IMAGE_MODES,
     Options,
+    catalog_metadata,
     clock,
     given_vectors_check,
     kept_root,
@@ -48,6 +49,9 @@ from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
 
 STATE_FILE = "ingest_state.sqlite"
+# A source that loses more than this share of its files at once is more often
+# broken than pruned.
+MOST_GONE = 0.1
 COMMIT_EVERY = 100
 
 
@@ -143,6 +147,12 @@ def parse_args() -> argparse.Namespace:
         help="a parquet table of items elsewhere that show the manifest's objects: "
         "object_id, source, and source_id, and if known url, title, thumbnail, "
         "rights, rights_url, counts, tags, image, and link_type",
+    )
+    parser.add_argument(
+        "--allow-removals",
+        action="store_true",
+        help="take files the source no longer lists off the site even when they are "
+        "more than a tenth of those indexed",
     )
     parser.add_argument(
         "--retry-failed",
@@ -331,6 +341,7 @@ def main() -> int:
     refs, again = once_each(refs)
     if again:
         print(repeated_note(refs, again))
+    listed = {ref.key: ref for ref in refs}
     if args.limit:
         refs = refs[: args.limit]
     catalog = source.catalog_rows()
@@ -362,13 +373,26 @@ def main() -> int:
             return 2
 
     if state.fact("web_keys") != "host":
-        kept = kept_by_path(state, refs)
+        kept = kept_by_path(state, list(listed.values()))
         if kept:
             print(
                 f"Kept {counted(kept, 'web file', 'web files')} indexed by an earlier "
                 "version, which named them by their path alone; none is indexed again."
             )
         state.remember("web_keys", "host")
+    indexed = {file_of(key) for key in state.done_keys().values()}
+    gone = sorted(indexed - listed.keys())
+    if len(gone) > MOST_GONE * len(indexed) and not args.allow_removals:
+        print(
+            f"The source lists {len(listed):,} files now, but "
+            f"{counted(len(gone), 'file', 'files')} of the {len(indexed):,} indexed "
+            f"before are no longer among them, such as {such_as(gone)}.\nA source "
+            "that loses more than a tenth of its files at once is more often broken "
+            "than pruned, so nothing has changed. If they are gone on purpose, run "
+            "again with --allow-removals."
+        )
+        state.close()
+        return 2
 
     ids = [make_item_id(ref.key) for ref in refs]
     state.seed([(item_id, ref.key, ref.size) for item_id, ref in zip(ids, refs)])
@@ -379,6 +403,17 @@ def main() -> int:
     )
     print(f"Found {found}. {len(finished):,} already indexed, {len(pending):,} to go.")
 
+    options = Options(
+        thumbnails_dir=Path(settings.thumbnails_dir),
+        processed_dir=Path(settings.processed_data_dir),
+        data_dir=Path(settings.data_dir) if settings.data_dir else None,
+        download_workers=args.download_workers,
+        decode_workers=args.decode_workers,
+        batch_size=args.batch_size,
+        max_file_bytes=int(args.max_file_mb * 1024**2),
+        max_inflight_bytes=int(args.max_inflight_mb * 1024**2),
+        images=args.images,
+    )
     if pending:
         settings.device = DeviceType(
             best_device() if args.device == "auto" else args.device
@@ -391,17 +426,6 @@ def main() -> int:
             state.remember("estimated_seconds", str(args.estimated_seconds))
         print(f"Model: {service.model_name} on {service.device}")
         print(f"{kept_where(args.images)}\n")
-        options = Options(
-            thumbnails_dir=Path(settings.thumbnails_dir),
-            processed_dir=Path(settings.processed_data_dir),
-            data_dir=Path(settings.data_dir) if settings.data_dir else None,
-            download_workers=args.download_workers,
-            decode_workers=args.decode_workers,
-            batch_size=args.batch_size,
-            max_file_bytes=int(args.max_file_mb * 1024**2),
-            max_inflight_bytes=int(args.max_inflight_mb * 1024**2),
-            images=args.images,
-        )
         checked = given_vectors_check(source, pending, service, options)
         if checked:
             accepted, message = checked
@@ -454,6 +478,12 @@ def main() -> int:
                 f"{counted(unread, 'related item', 'related items')}; "
                 f"{they(unread)} listed without one."
             )
+    keys = state.done_keys()
+
+    def catalog_now(item_id: str) -> dict | None:
+        ref = listed.get(file_of(keys.get(item_id, "")))
+        return catalog_metadata(ref.extra.get("row"), source, options) if ref else None
+
     written = write_from_state(
         state,
         embeddings_dir,
@@ -461,6 +491,7 @@ def main() -> int:
         settings.model_name,
         settings.model_revision,
         related,
+        catalog_now,
     )
     if written:
         state.remember("collection", json.dumps(written))

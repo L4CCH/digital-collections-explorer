@@ -357,6 +357,25 @@ def model_address(catalog: dict, source: Source, options: Options) -> str | None
     return kept_model(address, options) if address else None
 
 
+CATALOG_FIELDS = (
+    "catalog",
+    "object_id",
+    "source_url",
+    "model_url",
+    "view_orbit",
+    "iiif",
+    "title",
+    "description",
+)
+
+
+def read_again(metadata: dict, catalog_now: dict) -> dict:
+    kept = {
+        name: value for name, value in metadata.items() if name not in CATALOG_FIELDS
+    }
+    return {**kept, **catalog_now}
+
+
 def catalog_metadata(catalog: dict | None, source: Source, options: Options) -> dict:
     if not catalog:
         return {}

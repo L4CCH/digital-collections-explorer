@@ -134,6 +134,11 @@ def collection_lines(written: dict | None) -> list[str]:
             f"    {plural(written['uncataloged_items'], 'image')} without a catalog "
             "record, found by appearance only"
         )
+    if written.get("left_out"):
+        lines.append(
+            f"    {plural(written['left_out'], 'image')} no longer listed by the source, "
+            "left out but kept indexed"
+        )
     if written["searchable_records"]:
         lines.append(
             f"    Catalog search covers {plural(written['searchable_records'], 'record')}"
