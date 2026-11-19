@@ -84,6 +84,13 @@ KINDS = {
         "catalog_number",
         "inventory_number",
     ),
+    "rights": (
+        "rights",
+        "license",
+        "copyright",
+        "credit_line",
+        "rights_statement",
+    ),
     "notes": (
         "description",
         "notes",
@@ -374,7 +381,8 @@ def read_catalog(columns: dict[str, Any], record_id: str | None = None) -> Catal
 
     text: dict[str, list[str]] = defaultdict(list)
     for kind, values in by_kind.items():
-        text[SEARCHED_AS[kind]].extend(values)
+        if kind in SEARCHED_AS:
+            text[SEARCHED_AS[kind]].extend(values)
     if record_id:
         text["identifiers"].insert(0, record_id)
     if text.get("dates"):

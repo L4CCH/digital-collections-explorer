@@ -189,6 +189,7 @@ KIND_WORDS = {
     "physical": "materials",
     "identifiers": "catalog numbers",
     "notes": "notes",
+    "rights": "rights and credit",
 }
 ROLE_WORDS = {
     "title": "the title, searched",
@@ -224,6 +225,9 @@ def use_of(f) -> str:
         place = f"on the page as {form[1]}, "
     else:
         place = "on the page, "
+    if not f.searchable:
+        where = place.removesuffix(", ") or "not on the page"
+        return f"{KIND_WORDS[f.read_as]}: {where}, not searched"
     use = f"{KIND_WORDS[f.read_as]}: {place}searched"
     if f.filtered_as:
         use += f", filter by {f.filtered_as.replace('_', ' ')}"

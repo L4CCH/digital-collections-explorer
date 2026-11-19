@@ -98,7 +98,10 @@ def normalize_base_path(value: str | None) -> str:
 def load_config(config_path: Path | None = None):
     """Load configuration from JSON file"""
     if config_path is None:
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
+        config_path = Path(
+            os.environ.get("DCE_CONFIG")
+            or Path(__file__).parent.parent.parent.parent / "config.json"
+        )
 
     if config_path.exists():
         with open(config_path, "r") as f:

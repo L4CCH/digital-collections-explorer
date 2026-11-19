@@ -75,6 +75,18 @@ def test_a_config_that_names_only_the_model_gets_its_type_from_the_name(
     assert (loaded.model_type.value, loaded.model_name) == (model_type, name)
 
 
+def test_dce_config_names_another_configuration(tmp_path, monkeypatch):
+    from src.backend.core.config import load_config
+
+    path = write_config(tmp_path, {"model_name": "google/siglip2-base-patch16-224"})
+    monkeypatch.setenv("DCE_CONFIG", str(path))
+    loaded = load_config()
+    assert (loaded.model_type.value, loaded.model_name) == (
+        "siglip2",
+        "google/siglip2-base-patch16-224",
+    )
+
+
 def test_choosing_clip_without_a_name_gets_the_clip_default(tmp_path):
     from src.backend.core.config import load_config
 

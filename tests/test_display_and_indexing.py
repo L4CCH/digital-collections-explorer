@@ -10,7 +10,7 @@ from tests.test_related import ingest
 
 COLUMNS = (
     '"image_url", "object_id", "title", "creator: Sitter", "creator: Artist", '
-    '"date: Date made", "creator:", "date:", "credit"'
+    '"date: Date made", "creator:", "date:", "credit_line: Credit"'
 )
 ROWS = (
     "('images/0.png', 'npg-1', 'Abraham Lincoln', 'Abraham Lincoln', "
@@ -67,3 +67,4 @@ def test_the_profile_says_where_each_kind_of_column_goes(tmp_path):
     assert "names: on the page as Sitter, searched" in report
     assert "names: searched, filter by name, not on the page" in report
     assert "dates: on the page as Date made, searched" in report
+    assert "rights and credit: on the page as Credit, not searched" in report

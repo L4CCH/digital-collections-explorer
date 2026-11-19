@@ -316,6 +316,15 @@ def test_display_text_keeps_its_label_and_indexing_values_feed_the_filters():
     assert column_role("creator:", ["x"]) == ("names", "name")
 
 
+def test_rights_and_credit_lines_are_shown_but_not_searched():
+    catalog = read_catalog(
+        {"title": "A harbor", "credit_line": "Gift of the artist", "license": "CC0"}
+    )
+    assert [label for _, label, _ in catalog.fields] == ["Credit line", "License"]
+    assert "Gift of the artist" not in str(catalog.text) and catalog.facets == []
+    assert column_role("credit_line", ["x"]) == ("rights", None)
+
+
 def test_a_prefix_the_site_does_not_know_leaves_a_column_as_it_was():
     assert labeled("dc:creator") is None and labeled("Credit: line") is None
     catalog = read_catalog({"dc:creator": "Koch, Augustus"})
