@@ -2,6 +2,8 @@ cff-version: 1.2.0
 message: If you use Digital Collections Explorer in research, please cite the paper below and the release you used.
 type: software
 title: Digital Collections Explorer
+version: 2.0.0-beta.3
+date-released: 2026-11-18
 abstract: >-
   The open-source, multimodal viewer for searching digital collections, with or without a catalog.
   A gallery, library, archive, or museum points it at a folder, an S3 bucket, or a
