@@ -1,11 +1,11 @@
 ---
 name: dce-setup
-description: Turn a folder, S3 bucket, or parquet manifest of images, PDFs or 3D models into a searchable collection site with Digital Collections Explorer. Use when someone wants to explore, search, index, or publish a digital collection, including one with no metadata, no catalog, or messy file names, or one whose images are served by an IIIF image server. Inspects the collection, says what is and is not possible, asks only what a person must decide, builds the index, and starts the site.
+description: Turn a folder, S3 bucket, or parquet manifest of images, PDFs, or 3D models into a searchable collection site with Digital Collections Explorer, first writing a short program that reads the collection when it is behind a museum's API or another system. Use when someone wants to explore, search, index, or publish a digital collection, including one with no metadata, no catalog, or messy file names, one whose images are served by an IIIF image server, or one that can be read only through an API. Inspects the collection, says what is and is not possible, asks only what a person must decide, builds the index, and starts the site.
 license: MIT
 compatibility: Run from the root of the digital-collections-explorer repository. Needs Python 3.10+, Node.js 20.19+ and a shell, and network access for S3, web or IIIF sources.
 metadata:
   author: digital-collections-explorer
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Set up a searchable collection
@@ -64,6 +64,12 @@ Keep the JSON to yourself. You need `device`, `memory_bytes`, `free_disk_bytes`,
 
 ## Step 2. Look at the collection
 
+If the collection is not a folder, a bucket, or a manifest, such as one behind a
+museum's API or in a collection management system that exports nothing usable,
+first write a short program that reads it, as
+[references/writing-a-source.md](references/writing-a-source.md) says, and
+profile the manifest it writes.
+
 ```bash
 $PY -m src.profiling /path/to/folder --json /tmp/profile.json
 $PY -m src.profiling s3://bucket/prefix --anonymous --json /tmp/profile.json
@@ -71,9 +77,12 @@ $PY -m src.profiling manifest.parquet --json /tmp/profile.json
 ```
 
 Use `--anonymous` for a public bucket, and leave it off when
-`aws_credentials_found` is true and the bucket is private. A manifest names each
-image in a column such as `image_url`, or only by its IIIF service in a column
-such as `iiif`, with any catalog fields beside it, and a `group` column when
+`aws_credentials_found` is true and the bucket is private. The profile reads
+one file, or one IIIF `info.json`, for each of 300 sampled images (`--sample`);
+add `--requests-per-second` when the source asks for a slow pace. A manifest
+names each image in a column such as `image_url`, or only by its IIIF service
+in a column such as `iiif`, with any catalog fields beside it, and a `group`
+column when
 the site holds several institutions or museums. [Mapping your data](https://l4cch.github.io/dce-website/docs/mapping-your-data/)
 lists the columns the site reads and shows how to make a manifest from a
 spreadsheet, a collection system's export or IIIF manifests. Read the printed report and
@@ -91,8 +100,8 @@ exactly those, unless `frontend_built` is true and `frontend_media` matches:
 npm install && npm run setup -- --with=MEDIA
 ```
 
-`MEDIA` is the list joined by commas, or `none`. Then install what the list
-needs, unless `python_packages` says it is there:
+`MEDIA` is the list joined by commas, or `none`; `config.json` keeps it. Then
+install what the list needs, unless `python_packages` says it is there:
 `$PY -m pip install -r requirements-pdf.txt` for `pdf`, and
 `$PY -m pip install -r requirements-3d.txt` for `3d`.
 
@@ -150,7 +159,7 @@ names an IIIF service, web addresses of images, or thumbnails. It sets
 Images the source cannot show, such as TIFF files, are copied whatever the
 answer. Linking depends on the source staying up, fast and at the same
 addresses, and on it letting other sites show its images. Say so when you
-recommend it.
+recommend it. When a source's terms forbid keeping copies, the answer is `link`.
 
 ## Step 5. Build the index
 
@@ -164,9 +173,15 @@ $PY -m src.ingest SOURCE --data-dir data/collections/NAME --images MODE \
   --estimated-seconds SECONDS --json data/collections/NAME/ingest_summary.json
 ```
 
-`SECONDS` is `sizing.embed_seconds.estimated` from the profile, or `compute` when
-the download speed could not be measured, so the report can compare it with
-what happened. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2.
+`SECONDS` is `sizing.embed_seconds.estimated` from the profile, so the report
+can compare it with what happened. When there is none, the profile could not
+time downloading: first index a few hundred with `--limit` into the same folder,
+without `--estimated-seconds` and with `--json
+data/collections/NAME/sample_summary.json`, and work out a rough `SECONDS` for
+the whole collection from `run.images_per_second` in that summary. The full run
+goes on from there. `SOURCE`, `--anonymous` and `--fetch-via` are as in step 2.
+For items elsewhere from a source, add
+`--related data/sources/NAME/related.parquet`.
 `--limit N` indexes the first N files in name order for a sample, which may all
 come from one folder: say so.
 
@@ -174,10 +189,24 @@ come from one folder: say so.
   `$PY -m src.ingest --status --data-dir data/collections/NAME`.
 - It can be stopped at any time. The same command continues where it left off.
   `--retry-failed` tries failed images again.
+- Run again after the source has changed, the same command brings the site up
+  to date: new files are indexed, catalog text is read again, and files the
+  source no longer lists leave the site but stay indexed. When more than a tenth
+  of the indexed files are gone at once, it stops instead; ask the person before
+  running it with `--allow-removals`.
+- `--requests-per-second N` keeps indexing to N requests a second to web
+  servers. Use what a source's terms ask; when they say nothing about its image
+  server, keep to a few a second, such as 4. Each image with an IIIF service
+  takes two requests, the image and its `info.json`, and only the `info.json`
+  when the manifest gives its vector and `--images` is `link`.
 - Originals are never stored. An image with an IIIF service is requested from
-  it at the size needed, not downloaded whole.
-- A few failures are normal. Report the count and the reasons from `problems`,
-  and investigate only above a few percent.
+  it at the size needed, not downloaded whole, unless the server refuses that
+  size, as one that keeps only a few fixed sizes does.
+- A request that fails for a moment is tried again for about half a minute. A
+  few failures are normal. Report the count and the reasons from `problems`,
+  which say what happened, such as `the server answered 404 Not Found` or `the
+  server could not be reached`, and investigate only above a few percent, with
+  [references/troubleshooting.md](references/troubleshooting.md).
 - Each page of a PDF becomes an image of its document, and the document's page
   shows them in order.
 - `$PY -m src.ingest --report --data-dir data/collections/NAME` describes a run
@@ -200,8 +229,8 @@ curl -s http://localhost:$PORT/api/health
 curl -s "http://localhost:$PORT/api/search/text?query=a%20portrait&limit=3"
 ```
 
-`collection` must equal `NAME`, `items` must equal `indexed` in the summary, and
-the search must return results.
+`collection` must equal `NAME`, `items` must equal `collection.items` in the
+summary, and the search must return results.
 
 Without a `collection.json` in `data/collections/NAME/`, the site shows a
 generic title and no suggested searches. Write one with the person from
@@ -231,6 +260,8 @@ a date from it.
 
 ## More
 
+- Reading a collection from an API or another system:
+  [references/writing-a-source.md](references/writing-a-source.md).
 - Something went wrong: [references/troubleshooting.md](references/troubleshooting.md).
 - Putting the site on a server or AWS, opening it to the public, or letting AI
   assistants search it, only when the person asks:

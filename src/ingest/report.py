@@ -38,11 +38,27 @@ def cloud_machine_type() -> str | None:
         return None
 
 
-def active_seconds(finish_times: list[int], first_item_seconds: float) -> float:
+def gap_seconds(finish_times: list[int], first_item_seconds: float) -> float:
     if not finish_times:
         return 0.0
     gaps = (later - earlier for earlier, later in zip(finish_times, finish_times[1:]))
     return first_item_seconds + sum(gap for gap in gaps if gap <= PAUSE_SECONDS)
+
+
+def active_seconds(
+    finish_times: list[int], first_item_seconds: float, runs: list | tuple = ()
+) -> float:
+    if not runs:
+        return gap_seconds(finish_times, first_item_seconds)
+    starts = [int(start) for start, _ in runs]
+    earlier = [moment for moment in finish_times if moment < starts[0]]
+    total = gap_seconds(earlier, first_item_seconds)
+    for (start, end), next_start in zip(runs, starts[1:] + [float("inf")]):
+        if end is None:
+            inside = [t for t in finish_times if int(start) <= t < next_start]
+            end = inside[-1] if inside else start
+        total += max(0.0, end - start)
+    return total
 
 
 def iso(epoch_seconds: float | None) -> str | None:
@@ -56,7 +72,7 @@ def run_report(state: IngestState) -> dict:
     counts = state.counts()
     finish_times = state.finish_times()
     first_item_seconds = state.first_item_seconds()
-    seconds = active_seconds(finish_times, first_item_seconds)
+    seconds = active_seconds(finish_times, first_item_seconds, state.runs())
     indexed = counts.get("done", 0)
     bytes_read = state.bytes_read()
     is_finished = bool(finish_times) and counts.get("pending", 0) == 0
@@ -117,6 +133,11 @@ def collection_lines(written: dict | None) -> list[str]:
         lines.append(
             f"    {plural(written['uncataloged_items'], 'image')} without a catalog "
             "record, found by appearance only"
+        )
+    if written.get("left_out"):
+        lines.append(
+            f"    {plural(written['left_out'], 'image')} no longer listed by the source, "
+            "left out but kept indexed"
         )
     if written["searchable_records"]:
         lines.append(

@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import argparse
+import http.client
+import json
 import os
 import tempfile
+import threading
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 from urllib.parse import unquote, urlparse
 
+import numpy as np
 from pi_heif import register_heif_opener
 
 from src.backend.core.catalog_keys import IIIF_KEYS
-from src.backend.services.catalog_fields import iiif_info_from
+from src.backend.services.catalog_fields import iiif_info_from, object_id_from
 
 register_heif_opener()
 
@@ -30,6 +37,7 @@ IMAGE_EXTS = {
 }
 BROWSER_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "avif"}
 DOCUMENT_EXTS = {"pdf"}
+VECTOR_COLUMN = "vector"
 MODEL_EXTS = {"glb", "gltf"}
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini", ".picasa.ini"}
 JUNK_DIRS = {".git", "__pycache__", ".cache", "node_modules", ".thumbnails"}
@@ -46,6 +54,10 @@ PROBE_FILES = 6
 PROBE_CONCURRENCY = 8
 S3_POOL_SIZE = 32
 HTTP_TIMEOUT_SECONDS = 30
+# Waits before trying a failed web request again, about half a minute in all.
+RETRY_WAITS = (1, 2, 4, 8, 16)
+MAX_RETRY_AFTER_SECONDS = 60
+TRANSIENT_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 USER_AGENT = "digital-collections-explorer (https://github.com/L4CCH/digital-collections-explorer)"
 
 
@@ -58,18 +70,26 @@ class FileRef:
     is_junk: bool = False
     is_document: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+    size_known: bool = True
+    name: str = ""
 
     @property
     def basename(self) -> str:
-        return self.key.rsplit("/", 1)[-1]
+        return (self.name or self.key).rsplit("/", 1)[-1]
 
     @property
     def parts(self) -> list[str]:
-        return self.key.split("/")[:-1]
+        return (self.name or self.key).split("/")[:-1]
 
 
-def classify(key: str, size: int, extra: dict | None = None) -> FileRef:
-    base = key.rsplit("/", 1)[-1]
+def classify(
+    key: str,
+    size: int,
+    extra: dict | None = None,
+    size_known: bool = True,
+    name: str = "",
+) -> FileRef:
+    base = (name or key).rsplit("/", 1)[-1]
     ext = base.rsplit(".", 1)[-1].lower() if "." in base else ""
     junk = base.lower() in JUNK_NAMES or base.startswith("._")
     return FileRef(
@@ -80,7 +100,38 @@ def classify(key: str, size: int, extra: dict | None = None) -> FileRef:
         is_junk=junk,
         is_document=ext in DOCUMENT_EXTS,
         extra=extra or {},
+        size_known=size_known,
+        name=name,
     )
+
+
+def web_names(url: str) -> tuple[str, str]:
+    parts = urlparse(url)
+    path = unquote(parts.path).lstrip("/")
+    host = f"{parts.hostname or ''}{f':{parts.port}' if parts.port else ''}"
+    key = f"{host}/{path}"
+    return (f"{key}?{parts.query}" if parts.query else key), path
+
+
+def once_each(refs) -> tuple[list[FileRef], list[FileRef]]:
+    first: dict[str, FileRef] = {}
+    again: list[FileRef] = []
+    for ref in refs:
+        if ref.key in first:
+            again.append(ref)
+        else:
+            first[ref.key] = ref
+    return list(first.values()), again
+
+
+def object_of(ref: FileRef) -> str | None:
+    found = object_id_from(ref.extra.get("row") or {})
+    return str(found).strip() if found else None
+
+
+def left_without_image(kept, again) -> list[str]:
+    shown = {object_of(ref) for ref in kept}
+    return sorted({object_of(ref) for ref in again} - shown - {None, ""})
 
 
 def is_parquet(uri: str) -> bool:
@@ -88,17 +139,113 @@ def is_parquet(uri: str) -> bool:
     return path.lower().endswith(".parquet")
 
 
+class Pace:
+    def __init__(self) -> None:
+        self.interval = 0.0
+        self.next_at = 0.0
+        self.lock = threading.Lock()
+
+    def set(self, per_second: float | None) -> None:
+        self.interval = 1 / per_second if per_second else 0.0
+        self.next_at = 0.0
+
+    def wait(self) -> None:
+        if not self.interval:
+            return
+        with self.lock:
+            now = time.monotonic()
+            at = max(now, self.next_at)
+            self.next_at = at + self.interval
+        time.sleep(at - now)
+
+
+PACE = Pace()
+
+
+def per_second(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0.0
+    if not value > 0:
+        raise argparse.ArgumentTypeError(f"{text} is not a number above 0")
+    return value
+
+
+UNREAD = threading.local()
+
+
+def clear_unread() -> None:
+    UNREAD.status, UNREAD.reason = None, ""
+
+
+def unread_reason() -> str:
+    return getattr(UNREAD, "reason", "")
+
+
+def size_refused() -> bool:
+    status = getattr(UNREAD, "status", None)
+    return status == 501 or (
+        status is not None and 400 <= status < 500 and status not in TRANSIENT_STATUSES
+    )
+
+
+def retry_after(error) -> float:
+    try:
+        return min(float(error.headers.get("Retry-After", 0)), MAX_RETRY_AFTER_SECONDS)
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
+def no_answer(error: Exception) -> str:
+    reason = getattr(error, "reason", error)
+    if isinstance(error, TimeoutError) or isinstance(reason, TimeoutError):
+        return f"the server did not answer within {HTTP_TIMEOUT_SECONDS} seconds"
+    if isinstance(error, urllib.error.URLError):
+        return f"the server could not be reached ({reason})"
+    return f"the connection broke off ({type(error).__name__}: {error})"
+
+
 def fetch_web(url: str, limit: int | None = None) -> tuple[bytes, str] | None:
     """The body and content type found at a web address, or None if it cannot be read"""
-    import urllib.request
-
     headers = {"User-Agent": USER_AGENT}
     if limit:
         headers["Range"] = f"bytes=0-{limit - 1}"
+    clear_unread()
+    for wait in (*RETRY_WAITS, None):
+        PACE.wait()
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(
+                request, timeout=HTTP_TIMEOUT_SECONDS
+            ) as response:
+                body = response.read()
+                kind = (response.headers.get("Content-Type") or "").lower()
+                clear_unread()
+                return body, kind
+        except urllib.error.HTTPError as error:
+            UNREAD.status = error.code
+            UNREAD.reason = f"the server answered {error.code} {error.reason}".strip()
+            if error.code not in TRANSIENT_STATUSES:
+                return None
+            if wait is not None:
+                wait = max(wait, retry_after(error))
+        except (OSError, http.client.HTTPException) as error:
+            UNREAD.status, UNREAD.reason = None, no_answer(error)
+        except Exception as error:
+            UNREAD.status, UNREAD.reason = None, f"{type(error).__name__}: {error}"
+            return None
+        if wait is None:
+            return None
+        time.sleep(wait)
+    return None
+
+
+def iiif_size(service: str) -> tuple[int, int] | None:
+    fetched = fetch_web(f"{service}/info.json")
     try:
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            return response.read(), (response.headers.get("Content-Type") or "").lower()
+        info = json.loads(fetched[0])
+        return int(info["width"]), int(info["height"])
     except Exception:
         return None
 
@@ -148,7 +295,6 @@ class Source:
         picks = [r for r in refs if PROBE_MIN_BYTES < r.size < PROBE_MAX_BYTES][
             :PROBE_FILES
         ]
-        picks = picks or refs[:PROBE_FILES]
         if not picks:
             return 0.0
         started = time.time()
@@ -261,12 +407,16 @@ class ParquetManifestSource(Source):
         )
         self.con = duckdb.connect()
         self.con.execute("INSTALL httpfs; LOAD httpfs;")
-        self.columns = [
+        described = [
             row[0]
             for row in self.con.execute(
                 f"DESCRIBE SELECT * FROM read_parquet('{self.local_path}')"
             ).fetchall()
         ]
+        self.vector_column = next(
+            (column for column in described if column.lower() == VECTOR_COLUMN), None
+        )
+        self.columns = [column for column in described if column != self.vector_column]
         self.url_column = url_column or self._guess(URL_COLUMN_GUESSES)
         self.iiif_column = self._guess(IIIF_KEYS)
         self.size_column = size_column or self._guess(SIZE_COLUMN_GUESSES)
@@ -280,6 +430,7 @@ class ParquetManifestSource(Source):
             self.s3_bucket = urlparse(fetch_via).netloc
             self.s3 = s3_client(anonymous, region)
         self._rows: list[tuple] | None = None
+        self._vectors: list[np.ndarray | None] | None = None
 
     @staticmethod
     def _local_copy(path: str, anonymous: bool, region: str) -> str:
@@ -308,10 +459,27 @@ class ParquetManifestSource(Source):
 
     def _load(self) -> list[tuple]:
         if self._rows is None:
+            left_out = (
+                f' EXCLUDE ("{self.vector_column}")' if self.vector_column else ""
+            )
             self._rows = self.con.execute(
-                f"SELECT * FROM read_parquet('{self.local_path}')"
+                f"SELECT *{left_out} FROM read_parquet('{self.local_path}')"
             ).fetchall()
         return self._rows
+
+    def vectors(self) -> list[np.ndarray | None]:
+        if self._vectors is None:
+            self._vectors = []
+            if self.vector_column:
+                column = self.con.execute(
+                    f'SELECT "{self.vector_column}" '
+                    f"FROM read_parquet('{self.local_path}')"
+                ).fetchnumpy()[self.vector_column]
+                self._vectors = [
+                    None if value is np.ma.masked else np.asarray(value, np.float32)
+                    for value in column
+                ]
+        return self._vectors
 
     def describe(self):
         return {
@@ -321,6 +489,7 @@ class ParquetManifestSource(Source):
             "url_column": self.url_column,
             "iiif_column": self.iiif_column,
             "size_column": self.size_column,
+            "vector_column": self.vector_column,
             "fetch_via": f"s3://{self.s3_bucket}" if self.s3_bucket else None,
         }
 
@@ -337,19 +506,28 @@ class ParquetManifestSource(Source):
 
     def iter_files(self):
         size_index = self.columns.index(self.size_column) if self.size_column else None
-        for values in self._load():
-            row = dict(zip(self.columns, values))
+        vectors = self.vectors()
+        for index, values in enumerate(self._load()):
+            row = {c: v for c, v in zip(self.columns, values) if v is not None}
             url, named_by_service = self._address(row)
             if url is None:
                 continue
-            key = unquote(urlparse(url).path).lstrip("/") if "://" in url else url
-            size = int(values[size_index] or 0) if size_index is not None else 0
+            key, name = web_names(url) if "://" in url else (url, "")
+            given = values[size_index] if size_index is not None else None
+            size = int(given or 0)
             extra = {"url": url, "row": row, "named_by_service": named_by_service}
-            yield classify(key, size, extra)
+            if self.iiif_column:
+                info = iiif_info_from({self.iiif_column: row.get(self.iiif_column)})
+                if info:
+                    extra["iiif"] = info.removesuffix("/info.json")
+            if vectors and vectors[index] is not None:
+                extra["vector"] = vectors[index]
+            known = given not in (None, "")
+            yield classify(key, size, extra, size_known=known, name=name)
 
     def read_bytes(self, ref, limit=None):
         if self.s3 is not None:
-            request = {"Bucket": self.s3_bucket, "Key": ref.key}
+            request = {"Bucket": self.s3_bucket, "Key": ref.name or ref.key}
             if limit:
                 request["Range"] = f"bytes=0-{limit - 1}"
             try:
@@ -394,6 +572,7 @@ class ParquetManifestSource(Source):
         )
         if not (is_image or is_pdf):
             returned = content_type.split(";")[0] or "an unknown type"
+            UNREAD.reason = f"the address gives {returned}, not an image"
             self.fetch_note = (
                 f"The '{self.url_column or self.iiif_column}' column returns {returned}, "
                 f"not image data. "
@@ -405,7 +584,7 @@ class ParquetManifestSource(Source):
 
     def original_uri(self, ref):
         if self.s3_bucket:
-            return f"s3://{self.s3_bucket}/{ref.key}"
+            return f"s3://{self.s3_bucket}/{ref.name or ref.key}"
         url = ref.extra.get("url", ref.key)
         return self._local_file(url) or url
 

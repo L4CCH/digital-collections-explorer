@@ -17,7 +17,6 @@ class FieldProfile(BaseModel):
     name: str
     type: Literal["string", "date", "number", "enum", "geo", "bool"] = "string"
     provenance: Provenance | None = None
-    available: bool = True
     coverage: float = 0.0
     cardinality: int | None = None
     sample_values: list[Any] = Field(default_factory=list)
@@ -27,18 +26,12 @@ class FieldProfile(BaseModel):
     read_as: str | None = None
     filtered_as: str | None = None
     note: str = ""
-    remedy: dict[str, Any] | None = None
-
-    @classmethod
-    def unavailable(cls, name: str, note: str, remedy: dict | None = None, **kw):
-        return cls(name=name, available=False, note=note, remedy=remedy, **kw)
 
 
 class Capability(BaseModel):
     capability: str
     reason: str = ""
     remedy: str | None = None
-    cost: dict[str, Any] | None = None
 
 
 class Capabilities(BaseModel):
@@ -83,6 +76,7 @@ class ScanStats(BaseModel):
     non_image_files: int = 0
     unreadable_files: int = 0
     total_bytes: int = 0
+    images_without_size: int = 0
     formats: dict[str, int] = Field(default_factory=dict)
     format_bytes: dict[str, int] = Field(default_factory=dict)
     size_percentiles: dict[str, int] = Field(default_factory=dict)
@@ -129,6 +123,22 @@ class Decision(BaseModel):
     why: str = ""
 
 
+class GivenVectors(BaseModel):
+    rows: int = 0
+    given: int = 0
+    lengths: dict[int, int] = Field(default_factory=dict)
+    unusable: int = 0
+
+
+class RelatedItems(BaseModel):
+    path: str
+    rows: int = 0
+    sources: dict[str, int] = Field(default_factory=dict)
+    objects: int = 0
+    refused: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class CollectionProfile(BaseModel):
     profile_version: int = 1
     collection_id: str
@@ -145,6 +155,8 @@ class CollectionProfile(BaseModel):
     sizing: Sizing = Field(default_factory=Sizing)
     decisions: list[Decision] = Field(default_factory=list)
     media: list[str] = Field(default_factory=list)
+    vectors: GivenVectors | None = None
+    related: RelatedItems | None = None
 
     def field(self, name: str) -> FieldProfile | None:
         return next((f for f in self.fields if f.name == name), None)

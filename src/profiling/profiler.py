@@ -6,12 +6,14 @@ import re
 import statistics
 from collections import Counter, defaultdict
 
+import numpy as np
 from PIL import Image, ImageFile
 
 from src.backend.core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS, THUMBNAIL_KEYS
 from src.backend.services.catalog_fields import OBJECT_ID_KEYS
 from src.collection.catalog import (
     SEARCHED_AS,
+    base_of,
     column_role,
     group_id_warning,
     kind_of,
@@ -26,14 +28,16 @@ from .models import (
     Decision,
     DirectorySignal,
     FieldProfile,
+    GivenVectors,
     Issue,
     NamePattern,
     Provenance,
+    RelatedItems,
     ScanStats,
     Sizing,
     Structure,
 )
-from .sources import MODEL_EXTS, FileRef, Source
+from .sources import MODEL_EXTS, FileRef, Source, iiif_size, left_without_image
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Largest image seen in the Smithsonian NMAH collection was 123 megapixels.
@@ -95,6 +99,8 @@ WEB_IMAGE_SAMPLE = 50
 MAX_CATALOG_CANDIDATES = 10
 
 TINY_IMAGE_BYTES = 10_240
+# Sampling stops after this many files in a row could not be read.
+SAMPLE_MISSES = 5
 LARGE_SOURCE_BYTES = 20 * 1024**3
 PROGRESS_EVERY_FILES = 20_000
 TYPE_SAMPLE_ROWS = 500
@@ -212,6 +218,38 @@ def guess_dir_role(names: list[str]) -> tuple[bool, str]:
     return False, "unclear"
 
 
+def named(ref: FileRef) -> str:
+    if ref.extra.get("named_by_service"):
+        return ref.extra.get("iiif") or ref.key
+    return ref.extra.get("url") or ref.key
+
+
+def repeated_issues(images: list[FileRef], again: list[FileRef]) -> list[Issue]:
+    if not again:
+        return []
+    files = len({ref.key for ref in again})
+    issues = [
+        Issue(
+            kind="repeated_file",
+            count=files,
+            note=f"files named by more than one row, {files + len(again):,} rows in "
+            "all; each is indexed once, for the first row that names it",
+            examples=[named(again[0])],
+        )
+    ]
+    lost = left_without_image(images, again)
+    if lost:
+        issues.append(
+            Issue(
+                kind="no_image_left",
+                count=len(lost),
+                note="objects left out, since earlier rows name all their images",
+                examples=lost[:5],
+            )
+        )
+    return issues
+
+
 def scan(
     source: Source, sample: int, max_files: int | None, progress: bool
 ) -> tuple[ScanStats, list[FileRef], dict]:
@@ -222,9 +260,13 @@ def scan(
     unreadable: list[str] = []
     catalogs: list[FileRef] = []
 
+    seen: set[str] = set()
+    again: list[FileRef] = []
     for ref in source.iter_files():
         stats.total_files += 1
-        if ref.extra.get("unreadable"):
+        if ref.key in seen:
+            again.append(ref)
+        elif ref.extra.get("unreadable"):
             stats.unreadable_files += 1
             unreadable.append(ref.key)
         elif ref.is_junk:
@@ -238,6 +280,7 @@ def scan(
         elif ref.is_image:
             stats.image_files += 1
             stats.total_bytes += ref.size
+            stats.images_without_size += 0 if ref.size_known else 1
             stats.formats[ref.ext] = stats.formats.get(ref.ext, 0) + 1
             stats.format_bytes[ref.ext] = stats.format_bytes.get(ref.ext, 0) + ref.size
             images.append(ref)
@@ -246,16 +289,18 @@ def scan(
             other_exts[ref.ext or "no extension"] += 1
             if ref.ext in CATALOG_EXTS:
                 catalogs.append(ref)
+        seen.add(ref.key)
         if progress and stats.total_files % PROGRESS_EVERY_FILES == 0:
             print(f"    scanned {stats.total_files:,} files...", flush=True)
         if max_files and stats.total_files >= max_files:
             break
 
-    sizes = [ref.size for ref in images]
+    sizes = [ref.size for ref in images if ref.size_known]
     stats.size_percentiles = percentiles(sizes)
     stats.catalog_candidates = [
         catalog_candidate(ref) for ref in catalogs[:MAX_CATALOG_CANDIDATES]
     ]
+    stats.issues += repeated_issues(images, again)
     for name, count in junk.most_common(5):
         stats.issues.append(
             Issue(kind="junk_file", count=count, note=f"system file {name}")
@@ -338,8 +383,21 @@ def sample_images(source: Source, images: list[FileRef], count: int) -> dict:
         return result
     step = max(1, len(images) // count)
     widths, heights, modes = [], [], Counter()
+    misses = 0
     for ref in images[::step][:count]:
+        if misses >= SAMPLE_MISSES:
+            break
+        service = ref.extra.get("iiif")
+        if service:
+            size = iiif_size(service)
+            misses = 0 if size else misses + 1
+            if size:
+                result["sampled"] += 1
+                widths.append(size[0])
+                heights.append(size[1])
+            continue
         head = source.read_bytes(ref, HEAD_BYTES)
+        misses = 0 if head is not None else misses + 1
         if head is None:
             continue
         result["sampled"] += 1
@@ -449,7 +507,7 @@ def catalog_field(column: str, values: list, object_column: str | None) -> Field
         name=column,
         type=infer_type(present),
         provenance=Provenance.CATALOG,
-        coverage=round(len(present) / max(1, len(values)), 4),
+        coverage=len(present) * 10_000 // max(1, len(values)) / 10_000,
         cardinality=distinct,
         sample_values=[str(v)[:60] for v in present[:3]],
         searchable=read_as in SEARCHED_AS,
@@ -470,7 +528,7 @@ def catalog_field(column: str, values: list, object_column: str | None) -> Field
         )
     elif read_as is None:
         profile.note = "Holds no catalog text, only numbers or addresses."
-    elif kind_of(column) is None:
+    elif read_as == "notes" and kind_of(base_of(column)) is None:
         profile.note = "Read as notes, since the site does not know this column name."
     elif filtered_as and distinct == 1:
         profile.note = f"Only one value ({str(present[0])[:40]}) to filter by."
@@ -557,18 +615,6 @@ def file_derived_fields(
                 f"The site does not use it.",
             )
         )
-    else:
-        fields.append(
-            FieldProfile.unavailable(
-                "capture_date",
-                type="date",
-                note=f"Only {len(dates)} of {deep['sampled']} sampled images carry an EXIF date.",
-                remedy={
-                    "action": "infer dates from file or folder names",
-                    "confidence": "low",
-                },
-            )
-        )
 
     if deep["exif_gps"] / sampled > MIN_EXIF_COVERAGE:
         fields.append(
@@ -580,14 +626,6 @@ def file_derived_fields(
                 note="Where each picture was taken, read from EXIF GPS. For scanned "
                 "or photographed objects this is the studio, not the object's origin. "
                 "The site does not use it.",
-            )
-        )
-    else:
-        fields.append(
-            FieldProfile.unavailable(
-                "location",
-                type="geo",
-                note="No location field, and the images carry no GPS data.",
             )
         )
 
@@ -639,7 +677,6 @@ def infer_fields(
 def build_capabilities(
     fields: list[FieldProfile], structure: Structure
 ) -> Capabilities:
-    capability_names = {"capture_date": "date_range", "location": "geo_map"}
     roles = {f.read_as for f in fields if f.provenance == Provenance.CATALOG}
     searched = roles & set(SEARCHED_AS) - {"identifiers"}
     capabilities = Capabilities(
@@ -664,16 +701,6 @@ def build_capabilities(
                 "creator, date or description.",
             )
         )
-    for f in fields:
-        if not f.available:
-            capabilities.unavailable.append(
-                Capability(
-                    capability=capability_names.get(f.name, f.name),
-                    reason=f.note,
-                    remedy=(f.remedy or {}).get("action"),
-                    cost=f.remedy,
-                )
-            )
     return capabilities
 
 
@@ -819,6 +846,36 @@ def media_needed(stats: ScanStats, fields: list[FieldProfile]) -> list[str]:
     return [medium for medium, is_needed in needed.items() if is_needed]
 
 
+def given_vectors(source: Source) -> GivenVectors | None:
+    if not getattr(source, "vector_column", None):
+        return None
+    vectors = source.vectors()
+    given = [vector for vector in vectors if vector is not None]
+    return GivenVectors(
+        rows=len(vectors),
+        given=len(given),
+        lengths=dict(Counter(len(vector) for vector in given)),
+        unusable=sum(1 for v in given if not np.isfinite(v).all() or not np.any(v)),
+    )
+
+
+def related_items(source: Source, path: str) -> RelatedItems:
+    from src.ingest.related import manifest_keys, read_related, related_problems, text
+
+    columns, rows = read_related(path)
+    object_ids, addresses = manifest_keys(list(source.iter_files()))
+    refused, notes = related_problems(columns, rows, object_ids, addresses)
+    named = {text(row.get("object_id")) for row in rows} & object_ids
+    return RelatedItems(
+        path=path,
+        rows=len(rows),
+        sources=dict(Counter(text(row.get("source")) or "?" for row in rows)),
+        objects=len(named),
+        refused=refused,
+        notes=notes,
+    )
+
+
 def profile_collection(
     source: Source,
     collection_id: str,
@@ -828,13 +885,14 @@ def profile_collection(
     model_type: str = "siglip",
 ) -> CollectionProfile:
     stats, images, deep = scan(source, sample, max_files, progress)
-    signals = directory_signals(images)
+    named = [ref for ref in images if not ref.extra.get("named_by_service")]
+    signals = directory_signals(named)
     fields, structure = infer_fields(source, images, deep, signals)
     return CollectionProfile(
         collection_id=collection_id,
         source=source.describe(),
         scan=stats,
-        name_patterns=name_patterns(images),
+        name_patterns=name_patterns(named),
         directory_signals=signals,
         fields=fields,
         structure=structure,
@@ -847,4 +905,5 @@ def profile_collection(
             any(source.web_image_address(ref) for ref in images[:WEB_IMAGE_SAMPLE]),
         ),
         media=media_needed(stats, fields),
+        vectors=given_vectors(source),
     )

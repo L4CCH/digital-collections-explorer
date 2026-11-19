@@ -24,6 +24,25 @@ MODEL = "https://example.org/models/stele-150k.glb"
 PAGE = "https://example.org/objects/stele"
 
 
+def test_list_cells_stay_lists_when_the_views_are_written(tmp_path):
+    from src.render3d.models import read_rows
+
+    path = tmp_path / "views.parquet"
+    names = ["Lincoln, Abraham", "Brady, Mathew B."]
+    write_manifest(
+        path,
+        [
+            {"image_url": "a.jpg", "creator:": names, "size_bytes": "12"},
+            {"image_url": "b.jpg", "title": "A harbor"},
+        ],
+    )
+    assert read_rows(str(path))[1] == [
+        {"image_url": "a.jpg", "creator:": names, "size_bytes": 12},
+        {"image_url": "b.jpg", "title": "A harbor"},
+    ]
+    assert write_manifest(tmp_path / "none.parquet", []) == 0
+
+
 def test_a_model_is_found_under_common_names_and_must_be_gltf():
     assert model_url_from({"model_url": MODEL}) == MODEL
     assert model_url_from({"glb": "models/vase.GLB"}) == "models/vase.GLB"

@@ -376,8 +376,6 @@ def write_collection(
     vectors: dict[str, tuple[Sequence[str], np.ndarray]],
     default_model: str | None = None,
     related: Sequence[Related] = (),
-    producer: dict[str, Any] | None = None,
-    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write a collection's index, metadata and vectors, replacing what was there before"""
     embeddings_dir = Path(embeddings_dir)
@@ -418,8 +416,6 @@ def write_collection(
             for g in groups
             if g.id in images
         ],
-        **({"producer": producer} if producer else {}),
-        **({"provenance": provenance} if provenance else {}),
     }
     written = embeddings_dir / f"{INDEX_INFO_FILE}.building"
     written.write_text(json.dumps(info, indent=2))

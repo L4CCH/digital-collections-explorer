@@ -6,9 +6,9 @@ import sys
 
 from src.backend.core.config import settings
 
-from .profiler import profile_collection
+from .profiler import profile_collection, related_items
 from .report import render
-from .sources import open_source
+from .sources import PACE, open_source, per_second
 
 
 def main() -> int:
@@ -40,9 +40,20 @@ def main() -> int:
         help="s3://bucket holding the files, when manifest URLs are not downloadable",
     )
     parser.add_argument(
+        "--related",
+        help="also check a parquet table of related items, as ingest --related reads",
+    )
+    parser.add_argument(
+        "--requests-per-second",
+        type=per_second,
+        help="send at most this many requests a second to web servers, as ingest "
+        "--requests-per-second does",
+    )
+    parser.add_argument(
         "--json", dest="json_path", help="also write the full profile as JSON"
     )
     args = parser.parse_args()
+    PACE.set(args.requests_per_second)
 
     source = open_source(args.uri, anonymous=args.anonymous, fetch_via=args.fetch_via)
     name = args.name or os.path.basename(args.uri.rstrip("/")) or args.uri
@@ -53,6 +64,8 @@ def main() -> int:
         max_files=args.max_files,
         model_type=settings.model_type.value,
     )
+    if args.related:
+        profile.related = related_items(source, args.related)
     print(render(profile))
 
     if args.json_path:

@@ -84,6 +84,13 @@ KINDS = {
         "catalog_number",
         "inventory_number",
     ),
+    "rights": (
+        "rights",
+        "license",
+        "copyright",
+        "credit_line",
+        "rights_statement",
+    ),
     "notes": (
         "description",
         "notes",
@@ -139,6 +146,7 @@ NOT_CATALOG = {
 }
 LINKS = set(SOURCE_URL_KEYS)
 LIST_SEPARATOR = re.compile(r"\s*[;|]\s*")
+LABELED = re.compile(r"(?P<column>[^:]+?)\s*:\s*(?P<label>.*)", re.DOTALL)
 TRAILING_MARKS = " ,;:/"
 YEAR = re.compile(r"\b(1[0-9]{3}|20[0-9]{2})\b")
 DECADE_IN_TEXT = re.compile(r"\b(1[0-9]{2}0|20[0-9]0)s\b")
@@ -226,6 +234,18 @@ def kind_of(column: str) -> str | None:
     return KIND_OF_COLUMN.get(name) or KIND_OF_COLUMN.get(name.removesuffix("s"))
 
 
+def labeled(column: str) -> tuple[str, str] | None:
+    match = LABELED.fullmatch(str(column).strip())
+    if not match or kind_of(match["column"]) is None:
+        return None
+    return match["column"], match["label"].strip()
+
+
+def base_of(column: str) -> str:
+    form = labeled(column)
+    return form[0] if form else column
+
+
 def label_of(column: str) -> str:
     """A column's name as a page shows it: date_created becomes Date created"""
     text = column.strip().replace("_", " ")
@@ -298,6 +318,10 @@ def column_role(column: str, values: list) -> tuple[str | None, str | None]:
     texts = [text for value in values for text in values_of(value)]
     if not texts:
         return None, None
+    form = labeled(column)
+    if form:
+        kind = kind_of(form[0])
+        return kind, None if form[1] else FILTERED_AS.get(kind)
     kind = kind_of(column)
     if kind is None:
         if all(NUMBER.fullmatch(text) for text in texts):
@@ -309,6 +333,9 @@ def column_role(column: str, values: list) -> tuple[str | None, str | None]:
 def read_catalog(columns: dict[str, Any], record_id: str | None = None) -> Catalog:
     """What the site shows, filters by and searches of one record's catalog columns"""
     by_kind: dict[str, list[str]] = defaultdict(list)
+    filtered: dict[str, list[str]] = defaultdict(list)
+    titles: list[str] = []
+    labeled_titles: list[str] = []
     shown: list[tuple[str, str, str]] = []
     source_url = None
     for column, value in columns.items():
@@ -329,18 +356,33 @@ def read_catalog(columns: dict[str, Any], record_id: str | None = None) -> Catal
         values = values_of(value)
         if not values:
             continue
+        form = labeled(name)
+        if form:
+            kind, label = kind_of(form[0]), form[1]
+            by_kind[kind].extend(values)
+            if not label:
+                filtered[kind].extend(values)
+                continue
+            if kind == "title":
+                labeled_titles.extend(values)
+            shown += [(name, label, v) for v in values]
+            continue
         kind = kind_of(name)
         if kind is None:
             if all(NUMBER.fullmatch(v) for v in values):
                 continue
             kind = "notes"
         by_kind[kind].extend(values)
-        if kind != "title":
+        filtered[kind].extend(values)
+        if kind == "title":
+            titles.extend(values)
+        else:
             shown += [(name, label_of(name), v) for v in values]
 
     text: dict[str, list[str]] = defaultdict(list)
     for kind, values in by_kind.items():
-        text[SEARCHED_AS[kind]].extend(values)
+        if kind in SEARCHED_AS:
+            text[SEARCHED_AS[kind]].extend(values)
     if record_id:
         text["identifiers"].insert(0, record_id)
     if text.get("dates"):
@@ -348,12 +390,12 @@ def read_catalog(columns: dict[str, Any], record_id: str | None = None) -> Catal
 
     facets: list[tuple[str, str]] = []
     for kind, facet in FILTERED_AS.items():
-        values = by_kind.get(kind, [])
+        values = filtered.get(kind, [])
         filed = filed_dates(values) if facet == "date" else split(values)
         facets += [(facet, value) for value in filed]
 
     return Catalog(
-        title=next(iter(by_kind.get("title", [])), None),
+        title=next(iter(titles or labeled_titles), None),
         source_url=source_url,
         fields=shown,
         facets=unique(facets),

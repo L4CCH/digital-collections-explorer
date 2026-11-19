@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-import json
 import os
 import queue
 import shutil
@@ -27,7 +26,15 @@ from src.backend.services.catalog_fields import (
     source_url_from,
     view_orbit_from,
 )
-from src.profiling.sources import FileRef, Source, fetch_web
+from src.profiling.sources import (
+    FileRef,
+    Source,
+    clear_unread,
+    fetch_web,
+    iiif_size,
+    size_refused,
+    unread_reason,
+)
 
 from .documents import Pdf, page_key
 from .state import IngestState, Result
@@ -55,6 +62,9 @@ MAX_ERROR_LENGTH = 500
 SHARD_PREFIX_LENGTH = 2
 
 IMAGE_MODES = ("copy", "thumbnails", "link")
+SPOT_CHECK_IMAGES = 20
+# A model's own vectors agree at a median of 0.93 or more; other images', about 0.7.
+SAME_MODEL_SIMILARITY = 0.85
 
 
 @dataclass
@@ -92,6 +102,8 @@ class Item:
     document: Document | None = None
     origin: Origin = field(default_factory=Origin)
     original_size: tuple[int, int] | None = None
+    vector: np.ndarray | None = None
+    bytes_read: int | None = None
 
 
 @dataclass
@@ -142,6 +154,7 @@ class Document:
                     "file_name": self.item.ref.basename,
                     "pages": self.pages,
                 },
+                bytes_read=self.item.bytes_read,
             )
         )
 
@@ -219,6 +232,29 @@ def failure(item: Item, stage: str, error: Exception) -> Result:
         describe_error(stage, error),
         elapsed_ms(item),
         page_key=item.page_key,
+        bytes_read=item.bytes_read,
+    )
+
+
+def unit(vector) -> np.ndarray | None:
+    vector = np.asarray(vector, dtype=np.float32)
+    norm = float(np.linalg.norm(vector))
+    return vector / norm if norm > 0 and np.isfinite(norm) else None
+
+
+def done(item: Item, vector) -> Result:
+    kept = unit(vector)
+    if kept is None:
+        return failure(item, "vector", ValueError("the vector is zero or not a number"))
+    return Result(
+        item.item_id,
+        "done",
+        None,
+        elapsed_ms(item),
+        item.metadata,
+        kept.tobytes(),
+        item.page_key,
+        item.bytes_read,
     )
 
 
@@ -241,17 +277,9 @@ def origin_of(source: Source, ref: FileRef) -> Origin:
     )
 
 
-def iiif_size(service: str) -> tuple[int, int] | None:
-    fetched = fetch_web(f"{service}/info.json")
-    try:
-        info = json.loads(fetched[0])
-        return int(info["width"]), int(info["height"])
-    except Exception:
-        return None
-
-
 def read_image(source: Source, options: Options, item: Item) -> bytes | None:
     """The image, asked of its IIIF service at the size this mode needs when there is one"""
+    clear_unread()
     service = item.origin.service
     if service:
         edge = PROCESSED_EDGE if options.images == "copy" else MODEL_INPUT_EDGE
@@ -259,6 +287,8 @@ def read_image(source: Source, options: Options, item: Item) -> bytes | None:
         if fetched and fetched[1].startswith("image/"):
             item.original_size = iiif_size(service)
             return fetched[0]
+        if fetched is None and not size_refused():
+            return None
     return source.read_bytes(item.ref)
 
 
@@ -276,13 +306,29 @@ def download_worker(
         if item is None:
             return
         item.started = time.time()
+        item.bytes_read = 0
+        if shown_from_its_service(item, options):
+            try:
+                size = iiif_size(item.origin.service)
+                if size is None:
+                    raise IOError("the IIIF service did not give the image's size")
+                item.metadata = image_metadata(source, options, item, size, {})
+                results.put(done(item, item.vector))
+            except Exception as error:
+                results.put(failure(item, "download", error))
+            continue
         item.reserved = budget.acquire(item.ref.size + RESERVE_PADDING_BYTES)
         try:
             item.blob = read_image(source, options, item)
             if item.blob is None:
-                raise IOError("the file could not be read from the source")
+                reason = unread_reason()
+                raise IOError(
+                    "the file could not be read from the source"
+                    + (f": {reason}" if reason else "")
+                )
+            item.bytes_read = len(item.blob)
             with stats.lock:
-                stats.bytes_in += len(item.blob)
+                stats.bytes_in += item.bytes_read
             outbox.put(item)
         except Exception as error:
             budget.release(item.reserved)
@@ -309,6 +355,25 @@ def model_address(catalog: dict, source: Source, options: Options) -> str | None
         address = source.local_address(address)
     address = servable_model(address)
     return kept_model(address, options) if address else None
+
+
+CATALOG_FIELDS = (
+    "catalog",
+    "object_id",
+    "source_url",
+    "model_url",
+    "view_orbit",
+    "iiif",
+    "title",
+    "description",
+)
+
+
+def read_again(metadata: dict, catalog_now: dict) -> dict:
+    kept = {
+        name: value for name, value in metadata.items() if name not in CATALOG_FIELDS
+    }
+    return {**kept, **catalog_now}
 
 
 def catalog_metadata(catalog: dict | None, source: Source, options: Options) -> dict:
@@ -378,19 +443,11 @@ def model_input(image: Image.Image) -> Image.Image:
     return image
 
 
-def decode_image(source: Source, options: Options, item: Item) -> None:
-    image = Image.open(io.BytesIO(item.blob))
-    width, height = item.original_size or image.size
-    image.draft("RGB", (PROCESSED_EDGE, PROCESSED_EDGE))
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    image.load()
-
-    if max(image.size) > PROCESSED_EDGE:
-        image.thumbnail((PROCESSED_EDGE, PROCESSED_EDGE), Image.Resampling.LANCZOS)
-    paths = keep_images(image, item, options)
-
-    item.metadata = {
+def image_metadata(
+    source: Source, options: Options, item: Item, size: tuple[int, int], paths: dict
+) -> dict:
+    width, height = size
+    return {
         "file_name": (
             None if item.ref.extra.get("named_by_service") else item.ref.basename
         ),
@@ -401,6 +458,28 @@ def decode_image(source: Source, options: Options, item: Item) -> None:
         "paths": {"original": original_of(source, item, paths), **paths},
         **catalog_metadata(item.ref.extra.get("row"), source, options),
     }
+
+
+def shown_from_its_service(item: Item, options: Options) -> bool:
+    return (
+        item.vector is not None
+        and options.images == "link"
+        and item.origin.service is not None
+    )
+
+
+def decode_image(source: Source, options: Options, item: Item) -> None:
+    image = Image.open(io.BytesIO(item.blob))
+    size = item.original_size or image.size
+    image.draft("RGB", (PROCESSED_EDGE, PROCESSED_EDGE))
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    image.load()
+
+    if max(image.size) > PROCESSED_EDGE:
+        image.thumbnail((PROCESSED_EDGE, PROCESSED_EDGE), Image.Resampling.LANCZOS)
+    paths = keep_images(image, item, options)
+    item.metadata = image_metadata(source, options, item, size, paths)
     item.image = model_input(image)
 
 
@@ -490,7 +569,10 @@ def decode_worker(
                 split_document(source, options, item, outbox, results)
             else:
                 decode_image(source, options, item)
-                outbox.put(item)
+                if item.vector is None:
+                    outbox.put(item)
+                else:
+                    results.put(done(item, item.vector))
         except Exception as error:
             results.put(failure(item, "decode", error))
         finally:
@@ -517,19 +599,7 @@ def encode_worker(
             outcomes = [(item, failure(item, "encode", error)) for item in batch]
         else:
             outcomes = [
-                (
-                    item,
-                    Result(
-                        item.item_id,
-                        "done",
-                        None,
-                        elapsed_ms(item),
-                        item.metadata,
-                        vector.astype(np.float32).tobytes(),
-                        item.page_key,
-                    ),
-                )
-                for item, vector in zip(batch, vectors)
+                (item, done(item, vector)) for item, vector in zip(batch, vectors)
             ]
         for item, result in outcomes:
             results.put(result)
@@ -613,6 +683,80 @@ def start(target, *args) -> threading.Thread:
     return thread
 
 
+def fresh_vectors(
+    source: Source, refs: list[FileRef], service, options: Options
+) -> tuple[list[FileRef], np.ndarray]:
+    read, images = [], []
+    for ref in refs:
+        item = Item(ref=ref, item_id=make_item_id(ref.key))
+        item.origin = origin_of(source, ref)
+        try:
+            image = Image.open(io.BytesIO(read_image(source, options, item)))
+            image.draft("RGB", (PROCESSED_EDGE, PROCESSED_EDGE))
+            image = image.convert("RGB")
+        except Exception:
+            continue
+        if max(image.size) > PROCESSED_EDGE:
+            image.thumbnail((PROCESSED_EDGE, PROCESSED_EDGE), Image.Resampling.LANCZOS)
+        read.append(ref)
+        images.append(model_input(image))
+    if not images:
+        return [], np.empty((0, 0), dtype=np.float32)
+    return read, service.encode_image(images).numpy()
+
+
+def given_vectors_check(
+    source: Source, refs: list[FileRef], service, options: Options
+) -> tuple[bool, str] | None:
+    given = [r for r in refs if not r.is_document and r.extra.get("vector") is not None]
+    if not given:
+        return None
+    model = service.model_name
+    keep = (
+        "Set config.json to the model that made them, or leave out the vector "
+        "column, and DCE will compute the vectors."
+    )
+    sample = given[:: max(1, len(given) // SPOT_CHECK_IMAGES)][:SPOT_CHECK_IMAGES]
+    read, fresh = fresh_vectors(source, sample, service, options)
+    if not read:
+        return False, (
+            f"None of the {len(sample)} sample images could be read, so the vectors "
+            f"the manifest gives cannot be checked against {model}."
+        )
+    lengths = sorted({len(ref.extra["vector"]) for ref in given})
+    if lengths != [fresh.shape[1]]:
+        listed = " or ".join(f"{n:,}" for n in lengths)
+        return False, (
+            f"The manifest's vectors have {listed} numbers each, but {model} makes "
+            f"vectors of {fresh.shape[1]:,}. {keep}"
+        )
+    agreement = float(
+        np.median(
+            [
+                (
+                    float(unit(ref.extra["vector"]) @ unit(vector))
+                    if unit(ref.extra["vector"]) is not None
+                    else 0.0
+                )
+                for ref, vector in zip(read, fresh)
+            ]
+        )
+    )
+    if agreement < SAME_MODEL_SIMILARITY:
+        return False, (
+            f"The manifest's vectors do not match {model}: re-embedded with it, "
+            f"{len(read)} sample images agree with the vectors given for them at a "
+            f"median similarity of {agreement:.2f}, while a model's own vectors agree "
+            f"above {SAME_MODEL_SIMILARITY}. They come from another model, or belong "
+            f"to other rows. {keep}"
+        )
+    return True, (
+        f"Using the vectors the manifest gives for {len(given):,} images: {len(read)} "
+        f"of them, re-embedded with {model}, agree at a median similarity of "
+        f"{agreement:.2f}."
+    )
+
+
 def run(
     source: Source, refs: list[FileRef], service, state: IngestState, options: Options
 ) -> tuple[Stats, ByteBudget]:
@@ -653,6 +797,7 @@ def run(
         for ref in refs:
             item = Item(ref=ref, item_id=make_item_id(ref.key))
             item.origin = origin_of(source, ref)
+            item.vector = None if ref.is_document else ref.extra.get("vector")
             if ref.size > options.max_file_bytes and not item.origin.service:
                 limit_mb = options.max_file_bytes / 1024**2
                 results.put(

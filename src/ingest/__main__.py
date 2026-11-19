@@ -16,15 +16,42 @@ from src.backend.services.index_info import (
     read_index_info,
 )
 from src.collection.catalog import group_id_warning
-from src.profiling.sources import open_source
+from src.profiling.sources import (
+    PACE,
+    left_without_image,
+    once_each,
+    open_source,
+    per_second,
+)
 
-from .documents import INSTALL_HINT, can_read_pdfs
+from .documents import INSTALL_HINT, can_read_pdfs, file_of
 from .export import write_from_state
-from .pipeline import IMAGE_MODES, Options, clock, kept_root, make_item_id, run
+from .pipeline import (
+    IMAGE_MODES,
+    Options,
+    catalog_metadata,
+    clock,
+    given_vectors_check,
+    kept_root,
+    make_item_id,
+    run,
+)
+from .related import (
+    counted,
+    kept_related,
+    manifest_keys,
+    read_related,
+    related_problems,
+    such_as,
+    they,
+)
 from .report import cloud_machine_type, render_report, run_report
 from .state import IngestState
 
 STATE_FILE = "ingest_state.sqlite"
+# A source that loses more than this share of its files at once is more often
+# broken than pruned.
+MOST_GONE = 0.1
 COMMIT_EVERY = 100
 
 
@@ -87,6 +114,12 @@ def parse_args() -> argparse.Namespace:
         "--device", default="auto", choices=["auto", "cuda", "mps", "cpu"]
     )
     parser.add_argument("--download-workers", type=int, default=16)
+    parser.add_argument(
+        "--requests-per-second",
+        type=per_second,
+        help="send at most this many requests a second to web servers, such as an "
+        "IIIF image server, when the source's terms ask for a slower pace",
+    )
     parser.add_argument("--decode-workers", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=settings.batch_size)
     parser.add_argument(
@@ -108,6 +141,18 @@ def parse_args() -> argparse.Namespace:
         help="what the site keeps of images their source can also show: copies "
         "(default), thumbnails only, or nothing (link), for rows that name an "
         "IIIF service or a web address",
+    )
+    parser.add_argument(
+        "--related",
+        help="a parquet table of items elsewhere that show the manifest's objects: "
+        "object_id, source, and source_id, and if known url, title, thumbnail, "
+        "rights, rights_url, counts, tags, image, and link_type",
+    )
+    parser.add_argument(
+        "--allow-removals",
+        action="store_true",
+        help="take files the source no longer lists off the site even when they are "
+        "more than a tenth of those indexed",
     )
     parser.add_argument(
         "--retry-failed",
@@ -166,6 +211,49 @@ def summary(state: IngestState, embeddings_dir: Path, data_dir: str | None) -> d
     }
 
 
+def repeated_note(kept: list, again: list) -> str:
+    files = len({ref.key for ref in again})
+    note = (
+        f"The manifest names {counted(files, 'file', 'files')} in more than one row, "
+        f"{files + len(again):,} rows in all; each file is indexed once, for the "
+        "first row that names it."
+    )
+    lost = left_without_image(kept, again)
+    if lost:
+        note += (
+            f" That leaves {counted(len(lost), 'object', 'objects')} without an "
+            f"image, such as {such_as(lost)}; {they(len(lost))} left out."
+        )
+    return note
+
+
+def kept_where(images: str) -> str:
+    if images == "link":
+        return (
+            "Images: shown from the source, and copied only where it cannot show them"
+        )
+    kept = f"Thumbnails: {settings.thumbnails_dir}"
+    if images == "copy":
+        kept += f" | Processed images: {settings.processed_data_dir}"
+    return kept
+
+
+def kept_by_path(state: IngestState, refs: list) -> int:
+    pairs = [
+        (make_item_id(ref.name), make_item_id(ref.key), ref.key)
+        for ref in refs
+        if ref.name and ref.name != ref.key
+    ]
+    present = state.present([old for old, _, _ in pairs] + [new for _, new, _ in pairs])
+    moves, taken = [], set()
+    for old, new, key in pairs:
+        if old in present and new not in present and old not in taken:
+            moves.append((old, new, key))
+            taken.add(old)
+    state.rekey(moves)
+    return len(moves)
+
+
 def readable_files(refs: list) -> tuple[list, str | None]:
     """The files this install can read, and how many PDFs it has to leave out"""
     documents = sum(1 for ref in refs if ref.is_document)
@@ -186,6 +274,7 @@ def foreign_index_exists(embeddings_dir: Path) -> bool:
 def main() -> int:
     args = parse_args()
     started = time.time()
+    PACE.set(args.requests_per_second)
     if args.data_dir:
         apply_data_dir(settings, args.data_dir)
     embeddings_dir = Path(settings.embeddings_dir)
@@ -228,6 +317,16 @@ def main() -> int:
         state.close()
         return 2
     state.remember("model_name", settings.model_name)
+    begun_with = state.fact("images") or "copy"
+    if begun_with != args.images and state.counts().get("done"):
+        print(
+            f"This collection was begun with --images {begun_with}, and the images "
+            f"indexed so far keep what that mode keeps.\nGoing on with --images "
+            f"{args.images} would mix the two. Either run with --images {begun_with}, "
+            f"or index into a new folder with --data-dir."
+        )
+        state.close()
+        return 2
 
     print(f"Listing images and PDFs in {args.uri} ...")
     source = open_source(args.uri, anonymous=args.anonymous, fetch_via=args.fetch_via)
@@ -239,6 +338,10 @@ def main() -> int:
         ),
         key=lambda ref: ref.key,
     )
+    refs, again = once_each(refs)
+    if again:
+        print(repeated_note(refs, again))
+    listed = {ref.key: ref for ref in refs}
     if args.limit:
         refs = refs[: args.limit]
     catalog = source.catalog_rows()
@@ -258,6 +361,38 @@ def main() -> int:
         print(f"Leaving out {unread}. Reading them needs one more package:")
         print(f"  {INSTALL_HINT}")
     documents = sum(1 for ref in refs if ref.is_document)
+    related_rows: list[dict] = []
+    if args.related:
+        columns, related_rows = read_related(args.related)
+        object_ids, addresses = manifest_keys(refs)
+        refused, notes = related_problems(columns, related_rows, object_ids, addresses)
+        for line in refused + notes:
+            print(line)
+        if refused:
+            state.close()
+            return 2
+
+    if state.fact("web_keys") != "host":
+        kept = kept_by_path(state, list(listed.values()))
+        if kept:
+            print(
+                f"Kept {counted(kept, 'web file', 'web files')} indexed by an earlier "
+                "version, which named them by their path alone; none is indexed again."
+            )
+        state.remember("web_keys", "host")
+    indexed = {file_of(key) for key in state.done_keys().values()}
+    gone = sorted(indexed - listed.keys())
+    if len(gone) > MOST_GONE * len(indexed) and not args.allow_removals:
+        print(
+            f"The source lists {len(listed):,} files now, but "
+            f"{counted(len(gone), 'file', 'files')} of the {len(indexed):,} indexed "
+            f"before are no longer among them, such as {such_as(gone)}.\nA source "
+            "that loses more than a tenth of its files at once is more often broken "
+            "than pruned, so nothing has changed. If they are gone on purpose, run "
+            "again with --allow-removals."
+        )
+        state.close()
+        return 2
 
     ids = [make_item_id(ref.key) for ref in refs]
     state.seed([(item_id, ref.key, ref.size) for item_id, ref in zip(ids, refs)])
@@ -268,6 +403,17 @@ def main() -> int:
     )
     print(f"Found {found}. {len(finished):,} already indexed, {len(pending):,} to go.")
 
+    options = Options(
+        thumbnails_dir=Path(settings.thumbnails_dir),
+        processed_dir=Path(settings.processed_data_dir),
+        data_dir=Path(settings.data_dir) if settings.data_dir else None,
+        download_workers=args.download_workers,
+        decode_workers=args.decode_workers,
+        batch_size=args.batch_size,
+        max_file_bytes=int(args.max_file_mb * 1024**2),
+        max_inflight_bytes=int(args.max_inflight_mb * 1024**2),
+        images=args.images,
+    )
     if pending:
         settings.device = DeviceType(
             best_device() if args.device == "auto" else args.device
@@ -279,27 +425,23 @@ def main() -> int:
         if args.estimated_seconds:
             state.remember("estimated_seconds", str(args.estimated_seconds))
         print(f"Model: {service.model_name} on {service.device}")
-        print(
-            f"Thumbnails: {settings.thumbnails_dir} | Processed images: "
-            f"{settings.processed_data_dir}\n"
-        )
-        options = Options(
-            thumbnails_dir=Path(settings.thumbnails_dir),
-            processed_dir=Path(settings.processed_data_dir),
-            data_dir=Path(settings.data_dir) if settings.data_dir else None,
-            download_workers=args.download_workers,
-            decode_workers=args.decode_workers,
-            batch_size=args.batch_size,
-            max_file_bytes=int(args.max_file_mb * 1024**2),
-            max_inflight_bytes=int(args.max_inflight_mb * 1024**2),
-            images=args.images,
-        )
+        print(f"{kept_where(args.images)}\n")
+        checked = given_vectors_check(source, pending, service, options)
+        if checked:
+            accepted, message = checked
+            print(message)
+            if not accepted:
+                state.close()
+                return 2
+        state.run_started()
         try:
             stats, budget = run(source, pending, service, state, options)
         except KeyboardInterrupt:
+            state.run_ended()
             print("\n\nStopped. Progress is saved. Run the same command to continue.")
             state.close()
             return 130
+        state.run_ended()
         elapsed = max(time.time() - started, 1e-6)
         print(
             f"\n\nIndexed {stats.done:,}, skipped {stats.skipped:,}, failed {stats.failed:,} "
@@ -313,12 +455,43 @@ def main() -> int:
         for status, error, count in state.problems():
             print(f"  {status:<8} {count:>6,}  {error}")
 
+    related = []
+    if related_rows:
+        data_dir = Path(settings.data_dir) if settings.data_dir else None
+        root = kept_root(data_dir, Path(settings.processed_data_dir)) / "related"
+        image_ids = {
+            ref.extra["url"]: make_item_id(ref.key)
+            for ref in refs
+            if ref.extra.get("url")
+        }
+        related, unread = kept_related(
+            related_rows,
+            image_ids,
+            root,
+            data_dir,
+            Path(args.related).resolve().parent,
+            args.download_workers,
+        )
+        if unread:
+            print(
+                "Could not read the thumbnails of "
+                f"{counted(unread, 'related item', 'related items')}; "
+                f"{they(unread)} listed without one."
+            )
+    keys = state.done_keys()
+
+    def catalog_now(item_id: str) -> dict | None:
+        ref = listed.get(file_of(keys.get(item_id, "")))
+        return catalog_metadata(ref.extra.get("row"), source, options) if ref else None
+
     written = write_from_state(
         state,
         embeddings_dir,
         settings.model_type.value,
         settings.model_name,
         settings.model_revision,
+        related,
+        catalog_now,
     )
     if written:
         state.remember("collection", json.dumps(written))

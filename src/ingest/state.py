@@ -51,6 +51,7 @@ class Result:
     metadata: dict[str, Any] = field(default_factory=dict)
     embedding: bytes | None = None
     page_key: str | None = None
+    bytes_read: int | None = None
 
 
 class IngestState:
@@ -73,6 +74,18 @@ class IngestState:
     def remember(self, name: str, value: str) -> None:
         self.con.execute("INSERT OR REPLACE INTO facts VALUES (?, ?)", (name, value))
         self.con.commit()
+
+    def runs(self) -> list[list]:
+        return json.loads(self.fact("runs") or "[]")
+
+    def run_started(self) -> None:
+        self.remember("runs", json.dumps(self.runs() + [[time.time(), None]]))
+
+    def run_ended(self) -> None:
+        runs = self.runs()
+        if runs:
+            runs[-1][1] = time.time()
+            self.remember("runs", json.dumps(runs))
 
     def stored_dimensions(self) -> int | None:
         row = self.con.execute(
@@ -100,6 +113,27 @@ class IngestState:
             finished.update(row[0] for row in rows)
         return finished
 
+    def done_keys(self) -> dict[str, str]:
+        return dict(self.con.execute("SELECT id, key FROM items WHERE status='done'"))
+
+    def present(self, ids: list[str]) -> set[str]:
+        found: set[str] = set()
+        for start in range(0, len(ids), SQL_PARAMETER_CHUNK):
+            chunk = ids[start : start + SQL_PARAMETER_CHUNK]
+            rows = self.con.execute(
+                f"SELECT id FROM items WHERE id IN ({','.join('?' * len(chunk))})",
+                chunk,
+            )
+            found.update(row[0] for row in rows)
+        return found
+
+    def rekey(self, moves: list[tuple[str, str, str]]) -> None:
+        self.con.executemany(
+            "UPDATE items SET id=?, key=? WHERE id=?",
+            [(new, key, old) for old, new, key in moves],
+        )
+        self.con.commit()
+
     def record(self, result: Result) -> None:
         if result.page_key is not None:
             self.con.execute(
@@ -108,13 +142,14 @@ class IngestState:
             )
         self.con.execute(
             "UPDATE items SET status=?, error=?, elapsed_ms=?, metadata=?, embedding=?, "
-            "updated_at=datetime('now') WHERE id=?",
+            "size_bytes=COALESCE(?, size_bytes), updated_at=datetime('now') WHERE id=?",
             (
                 result.status,
                 result.error,
                 result.elapsed_ms,
                 json.dumps(result.metadata, default=str) if result.metadata else None,
                 result.embedding,
+                result.bytes_read,
                 result.item_id,
             ),
         )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.collection.catalog import labeled
+
 from .models import CollectionProfile, Provenance
 from .profiler import DIR_ROLE_LABEL, LARGE_SOURCE_BYTES
 
@@ -27,12 +29,22 @@ def human_time(seconds: float) -> str:
     return f"{seconds / 3600:.1f} hours"
 
 
+def size_line(scan) -> str:
+    images = f"  {scan.image_files:,} images"
+    sized = scan.image_files - scan.images_without_size
+    if not scan.images_without_size:
+        return f"{images}, {human_bytes(scan.total_bytes)} in total"
+    if not sized:
+        return f"{images}; the manifest does not give their sizes"
+    return (
+        f"{images}; {human_bytes(scan.total_bytes)} in total for the {sized:,} "
+        "whose sizes the manifest gives"
+    )
+
+
 def overview_lines(p: CollectionProfile) -> list[str]:
     scan = p.scan
-    lines = [
-        "",
-        f"  {scan.image_files:,} images, {human_bytes(scan.total_bytes)} in total",
-    ]
+    lines = ["", size_line(scan)]
     if scan.size_percentiles:
         sizes = scan.size_percentiles
         lines.append(
@@ -177,6 +189,7 @@ KIND_WORDS = {
     "physical": "materials",
     "identifiers": "catalog numbers",
     "notes": "notes",
+    "rights": "rights and credit",
 }
 ROLE_WORDS = {
     "title": "the title, searched",
@@ -205,9 +218,21 @@ def use_of(f) -> str:
         return ROLE_WORDS[f.read_as]
     if f.read_as not in KIND_WORDS:
         return "not shown or searched"
-    use = f"{KIND_WORDS[f.read_as]}: on the page, searched"
+    form = labeled(f.name)
+    if form and not form[1]:
+        place = ""
+    elif form:
+        place = f"on the page as {form[1]}, "
+    else:
+        place = "on the page, "
+    if not f.searchable:
+        where = place.removesuffix(", ") or "not on the page"
+        return f"{KIND_WORDS[f.read_as]}: {where}, not searched"
+    use = f"{KIND_WORDS[f.read_as]}: {place}searched"
     if f.filtered_as:
         use += f", filter by {f.filtered_as.replace('_', ' ')}"
+    if form and not form[1]:
+        use += ", not on the page"
     return use
 
 
@@ -219,27 +244,19 @@ def field_lines(p: CollectionProfile) -> list[str]:
         filters = ", ".join(f.replace("_", " ") for f in capabilities.facets)
         lines.append(f"      - filter by {filters}")
     lines += ["", "  What the site does with each column:"]
-    for f in (f for f in p.fields if f.available):
+    for f in p.fields:
         lines.append(
             f"      [{SOURCE_LABEL.get(f.provenance, '?')}] {f.name:<20} "
-            f"{f.coverage:>4.0%} filled   {use_of(f)}"
+            f"{round(f.coverage * 10_000) // 100:>3}% filled   {use_of(f)}"
         )
         if f.note:
             lines.append(f"               {f.note}")
-    missing = [f for f in p.fields if not f.available]
-    unable = [c for c in capabilities.unavailable if c.capability == "catalog_search"]
-    if missing or unable:
+    if capabilities.unavailable:
         lines += ["", "  What is not possible:"]
-        for c in unable:
+        for c in capabilities.unavailable:
             lines.append(f"      x {CAPABILITY_WORDS[c.capability]}")
             lines.append(f"         Why: {c.reason}")
             lines.append(f"         Possible fix: {c.remedy}")
-        for f in missing:
-            lines.append(f"      x {f.name}")
-            lines.append(f"         Why: {f.note}")
-            if f.remedy:
-                details = ", ".join(f"{k}: {v}" for k, v in f.remedy.items())
-                lines.append(f"         Possible fix: {details}")
     return lines
 
 
@@ -279,10 +296,11 @@ def sizing_lines(p: CollectionProfile) -> list[str]:
             f"      Analysing the images alone takes about "
             f"{human_time(seconds['compute'])} (on {sizing.device})"
         )
-        lines.append(
-            "      WARNING: download speed could not be measured. "
-            "The real time may be far longer."
-        )
+        lines += [
+            "      WARNING: this leaves out downloading the images, which could not be",
+            "      timed here and may take far longer. Index a few hundred with --limit",
+            "      to time it.",
+        ]
     if sizing.source_bytes > LARGE_SOURCE_BYTES:
         lines.append(
             f"      On a cloud machine next to the data: about "
@@ -305,6 +323,58 @@ def decision_lines(p: CollectionProfile) -> list[str]:
     return lines
 
 
+def plural(count: int, one: str, many: str) -> str:
+    return f"{count:,} {one if count == 1 else many}"
+
+
+def given_lines(p: CollectionProfile) -> list[str]:
+    from src.ingest.pipeline import SPOT_CHECK_IMAGES
+
+    lines = []
+    vectors = p.vectors
+    if vectors and vectors.given:
+        sizes = " or ".join(f"{n:,}" for n in sorted(vectors.lengths))
+        lines += [
+            "",
+            "  Vectors given in the manifest:",
+            f"      {vectors.given:,} of {vectors.rows:,} rows give a vector of {sizes} "
+            "numbers. Indexing uses them instead of computing vectors, after "
+            f"re-embedding {min(SPOT_CHECK_IMAGES, vectors.given)} of them to check that they come from the "
+            "model in config.json.",
+        ]
+        if len(vectors.lengths) > 1:
+            lines.append(
+                "      Must fix before indexing: every vector needs as many numbers "
+                f"as the model makes, but these have {sizes}."
+            )
+        if vectors.unusable:
+            lines.append(
+                f"      {plural(vectors.unusable, 'vector is', 'vectors are')} zero or "
+                "not numbers; those images will fail."
+            )
+        if vectors.given < vectors.rows:
+            left = vectors.rows - vectors.given
+            lines.append(
+                f"      {plural(left, 'row gives', 'rows give')} no vector; indexing "
+                "computes those."
+            )
+    related = p.related
+    if related:
+        lines += ["", f"  Related items ({related.path}):"]
+        if related.rows and not related.refused:
+            by_source = ", ".join(
+                f"{count:,} from {source}"
+                for source, count in sorted(related.sources.items())
+            )
+            lines.append(
+                f"      {plural(related.rows, 'item', 'items')} for "
+                f"{plural(related.objects, 'object', 'objects')}: {by_source}."
+            )
+        lines += [f"      Must fix before indexing: {line}" for line in related.refused]
+        lines += [f"      {line}" for line in related.notes]
+    return lines
+
+
 def render(p: CollectionProfile) -> str:
     lines = [
         "=" * WIDTH,
@@ -315,6 +385,7 @@ def render(p: CollectionProfile) -> str:
     for section in (
         overview_lines,
         problem_lines,
+        given_lines,
         structure_lines,
         group_lines,
         naming_lines,
