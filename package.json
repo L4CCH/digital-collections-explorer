@@ -1,6 +1,6 @@
 {
   "name": "digital-collections-explorer",
-  "version": "1.2.0",
+  "version": "2.0.0-beta.3",
   "description": "A web-based exploratory search system and multimodal viewer for digital collections",
   "scripts": {
     "setup": "node src/setup.js",

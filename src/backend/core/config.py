@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     api_description: str = (
         "API for searching collections using CLIP or SigLIP embeddings"
     )
-    api_version: str = "0.1.1"
+    api_version: str = "2.0.0-beta.3"
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = True
