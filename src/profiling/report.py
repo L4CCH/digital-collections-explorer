@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.collection.catalog import labeled
+
 from .models import CollectionProfile, Provenance
 from .profiler import DIR_ROLE_LABEL, LARGE_SOURCE_BYTES
 
@@ -215,9 +217,18 @@ def use_of(f) -> str:
         return ROLE_WORDS[f.read_as]
     if f.read_as not in KIND_WORDS:
         return "not shown or searched"
-    use = f"{KIND_WORDS[f.read_as]}: on the page, searched"
+    form = labeled(f.name)
+    if form and not form[1]:
+        place = ""
+    elif form:
+        place = f"on the page as {form[1]}, "
+    else:
+        place = "on the page, "
+    use = f"{KIND_WORDS[f.read_as]}: {place}searched"
     if f.filtered_as:
         use += f", filter by {f.filtered_as.replace('_', ' ')}"
+    if form and not form[1]:
+        use += ", not on the page"
     return use
 
 

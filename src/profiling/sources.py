@@ -508,7 +508,7 @@ class ParquetManifestSource(Source):
         size_index = self.columns.index(self.size_column) if self.size_column else None
         vectors = self.vectors()
         for index, values in enumerate(self._load()):
-            row = dict(zip(self.columns, values))
+            row = {c: v for c, v in zip(self.columns, values) if v is not None}
             url, named_by_service = self._address(row)
             if url is None:
                 continue

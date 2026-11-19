@@ -13,6 +13,7 @@ from src.backend.core.catalog_keys import IIIF_KEYS, MODEL_URL_KEYS, THUMBNAIL_K
 from src.backend.services.catalog_fields import OBJECT_ID_KEYS
 from src.collection.catalog import (
     SEARCHED_AS,
+    base_of,
     column_role,
     group_id_warning,
     kind_of,
@@ -527,7 +528,7 @@ def catalog_field(column: str, values: list, object_column: str | None) -> Field
         )
     elif read_as is None:
         profile.note = "Holds no catalog text, only numbers or addresses."
-    elif read_as == "notes" and kind_of(column) is None:
+    elif read_as == "notes" and kind_of(base_of(column)) is None:
         profile.note = "Read as notes, since the site does not know this column name."
     elif filtered_as and distinct == 1:
         profile.note = f"Only one value ({str(present[0])[:40]}) to filter by."
